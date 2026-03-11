@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./storage:/app/storage
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017
+      - MONGODB_DATABASE=nextgen_lms
+    depends_on:
+      - mongodb
+    restart: always
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: always
+
+  client:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./client:/usr/share/nginx/html
+      - ./client/nginx.conf:/etc/nginx/conf.d/default.conf
+    restart: always
+
+volumes:
+  mongodb_data:
+  migration_data:

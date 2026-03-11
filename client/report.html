@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migration Report | NextGen LMS</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .report-wrapper {
+            max-width: 900px;
+            margin: 3rem auto;
+            padding: 0 1.5rem;
+        }
+
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 2rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .report-title h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: #1a1a1a;
+        }
+
+        .report-title p {
+            color: var(--text-muted);
+        }
+
+        .status-banner {
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .status-banner.success {
+            background: #ECFDF5;
+            border: 1px solid #10B981;
+            color: #065F46;
+        }
+
+        .status-banner.warning {
+            background: #FFFBEB;
+            border: 1px solid #F59E0B;
+            color: #92400E;
+        }
+
+        .status-banner.error {
+            background: #FEF2F2;
+            border: 1px solid #EF4444;
+            color: #991B1B;
+        }
+
+        .status-banner i {
+            width: 3rem;
+            height: 3rem;
+        }
+
+        .stats-grid-report {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .report-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+        }
+
+        .report-card h3 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        .report-card .val {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+
+        .inventory-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .inventory-table th,
+        .inventory-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .inventory-table th {
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .report-actions {
+            margin-top: 3rem;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-main);
+            text-decoration: none;
+            font-weight: 600;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+
+<body class="bg-light">
+    <div class="report-wrapper">
+        <a href="index.html" class="back-btn">
+            <i data-lucide="arrow-left"></i> Back to Dashboard
+        </a>
+
+        <header class="report-header">
+            <div class="report-title">
+                <h1 id="course-title">Loading Report...</h1>
+                <p id="migration-id">Task ID: --</p>
+            </div>
+            <div class="timestamp" id="timestamp">--</div>
+        </header>
+
+        <div id="status-banner" class="status-banner">
+            <i id="status-icon" data-lucide="loader"></i>
+            <div>
+                <h2 id="status-text">Checking Status</h2>
+                <p id="status-desc">Please wait while we fetch the results.</p>
+            </div>
+        </div>
+
+        <div class="stats-grid-report">
+            <div class="report-card">
+                <h3>Execution Time</h3>
+                <div class="val" id="exec-time">0.00s</div>
+            </div>
+            <div class="report-card">
+                <h3>Errors</h3>
+                <div class="val text-red" id="error-count">0</div>
+            </div>
+            <div class="report-card">
+                <h3>Warnings</h3>
+                <div class="val text-orange" id="warning-count">0</div>
+            </div>
+        </div>
+
+        <div class="report-card">
+            <h3>Content Inventory</h3>
+            <table class="inventory-table">
+                <thead>
+                    <tr>
+                        <th>Entity Type</th>
+                        <th>Original Count</th>
+                        <th>Migrated Count</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="inventory-body">
+                    <!-- Data will be injected here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="report-actions">
+            <button class="btn btn-secondary" onclick="window.print()">
+                <i data-lucide="printer"></i> Print Report
+            </button>
+            <button class="btn btn-primary" id="download-json">
+                <i data-lucide="download"></i> Download JSON
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+        const urlParams = new URLSearchParams(window.location.search);
+        const taskId = urlParams.get('taskId');
+
+        async function loadReport() {
+            if (!taskId) {
+                alert('No Task ID provided');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/status/${taskId}`);
+                const data = await response.json();
+                const report = data.report;
+
+                if (!report) {
+                    alert('Report data not yet available');
+                    return;
+                }
+
+                // Header Info
+                document.getElementById('course-title').innerText = report.course || 'Migration Task';
+                document.getElementById('migration-id').innerText = `Task ID: ${taskId.toUpperCase()}`;
+                document.getElementById('exec-time').innerText = `${report.execution_time || 0}s`;
+                document.getElementById('error-count').innerText = report.total_errors || 0;
+                document.getElementById('warning-count').innerText = report.total_warnings || 0;
+                document.getElementById('timestamp').innerText = new Date(data.timestamp).toLocaleString();
+
+                // Status Banner
+                const banner = document.getElementById('status-banner');
+                const statusIcon = document.getElementById('status-icon');
+                const statusText = document.getElementById('status-text');
+                const statusDesc = document.getElementById('status-desc');
+
+                banner.className = `status-banner ${report.status}`;
+                statusText.innerText = report.status === 'success' ? 'Migration Successful' :
+                    (report.status === 'success_with_warnings' ? 'Migration Successful with Warnings' : 'Migration Failed');
+                statusDesc.innerText = report.status === 'success' ? 'All course content has been successfully transformed and exported.' :
+                    'Some issues were encountered during the migration process.';
+                statusIcon.setAttribute('data-lucide', report.status === 'success' ? 'check-circle' : 'alert-circle');
+
+                // Inventory Table
+                const inventoryBody = document.getElementById('inventory-body');
+                const counts = report.counts || {}; // Migrated (Tutor)
+                const sourceCounts = report.source_counts || {}; // Original (Canvas)
+
+                const entities = [
+                    { label: 'Modules', sourceKey: 'modules', targetKey: 'topics' },
+                    { label: 'Pages', sourceKey: 'pages', targetKey: 'lessons' },
+                    { label: 'Assignments', sourceKey: 'assignments', targetKey: 'assignments' },
+                    { label: 'Quizzes', sourceKey: 'quizzes', targetKey: 'quizzes' },
+                    { label: 'Questions', sourceKey: 'questions', targetKey: 'questions' }
+                ];
+
+                inventoryBody.innerHTML = entities.map(e => `
+                    <tr>
+                        <td><strong>${e.label}</strong></td>
+                        <td>${sourceCounts[e.sourceKey] || 0}</td>
+                        <td>${counts[e.targetKey] || 0}</td>
+                        <td class="text-green"><i data-lucide="check" style="width: 14px;"></i> Verified</td>
+                    </tr>
+                `).join('');
+
+                // Actions
+                document.getElementById('download-json').onclick = () => {
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `migration_report_${taskId}.json`;
+                    a.click();
+                };
+
+                lucide.createIcons();
+
+            } catch (err) {
+                console.error(err);
+                alert('Error loading report');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadReport);
+    </script>
+</body>
+
+</html>

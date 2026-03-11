@@ -46,6 +46,8 @@ class CourseTransformer:
         self.errors: List[MigrationError] = []
         self.question_type_counts: Dict[str, int] = {}
         self.processed_assignments = set()
+        self.processed_pages = set()
+        self.processed_quizzes = set()
     
     def transform(self, canvas_course: CanvasCourse) -> tuple[TutorCourse, TransformationReport]:
         """
@@ -100,6 +102,46 @@ class CourseTransformer:
             report.lessons_created += len(topic.lessons)
             report.quizzes_created += len(topic.quizzes)
             report.assignments_created += len(topic.assignments)
+        
+        # Process orphaned pages
+        orphaned_pages = [
+            p for p in canvas_course.pages
+            if p.identifier not in self.processed_pages
+        ]
+        
+        if orphaned_pages:
+            page_topic = TutorTopic(
+                topic_title="Additional Lessons",
+                topic_order=len(tutor_course.topics) + 1,
+                source_canvas_id="orphaned_pages_topic"
+            )
+            for i, page in enumerate(orphaned_pages):
+                lesson = self._transform_page_to_lesson(page, i)
+                page_topic.lessons.append(lesson)
+            tutor_course.topics.append(page_topic)
+            report.topics_created += 1
+            report.lessons_created += len(page_topic.lessons)
+
+        # Process orphaned quizzes
+        orphaned_quizzes = [
+            q for q in canvas_course.quizzes
+            if q.identifier not in self.processed_quizzes
+        ]
+        
+        if orphaned_quizzes:
+            quiz_topic = TutorTopic(
+                topic_title="Additional Quizzes",
+                topic_order=len(tutor_course.topics) + 1,
+                source_canvas_id="orphaned_quizzes_topic"
+            )
+            for i, quiz in enumerate(orphaned_quizzes):
+                tutor_quiz = self._transform_quiz(quiz, i)
+                quiz_topic.quizzes.append(tutor_quiz)
+            tutor_course.topics.append(quiz_topic)
+            report.topics_created += 1
+            report.quizzes_created += len(quiz_topic.quizzes)
+            for quiz in quiz_topic.quizzes:
+                report.questions_created += len(quiz.questions)
             
             for quiz in topic.quizzes:
                 report.questions_created += len(quiz.questions)
@@ -197,6 +239,8 @@ class CourseTransformer:
             source_canvas_id=page.identifier
         )
         
+        self.processed_pages.add(page.identifier)
+        
         return lesson
     
     def _transform_quiz(self, quiz: CanvasQuiz, order: int) -> TutorQuiz:
@@ -229,6 +273,8 @@ class CourseTransformer:
             tutor_question = self._transform_question(question, position)
             if tutor_question:
                 tutor_quiz.questions.append(tutor_question)
+        
+        self.processed_quizzes.add(quiz.identifier)
         
         return tutor_quiz
     

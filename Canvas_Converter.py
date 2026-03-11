@@ -1,5 +1,5 @@
 """
-Production Canvas → Tutor LMS Migration Pipeline \ NextGen LMS
+Production Canvas -> Tutor LMS Migration Pipeline \ NextGen LMS
 
 This is the main entry point for the migration pipeline.
 Orchestrates all 5 stages of the migration process.
@@ -30,7 +30,7 @@ class MigrationPipeline:
     5. Export & Verification
     """
     
-    def __init__(self, course_directory: Path, output_directory: Optional[Path] = None):
+    def __init__(self, course_directory: Path, output_directory: Optional[Path] = None, on_progress=None):
         """
         Initialize the migration pipeline.
         
@@ -40,9 +40,11 @@ class MigrationPipeline:
         Args:
             course_directory: Path to the unzipped Canvas course export directory.
             output_directory: Optional path for the converted output. Defaults to 'lms_output'.
+            on_progress: Optional callback function(step_name, progress_pct, message)
         """
         # Convert path strings to Path objects for robust file handling
         self.course_directory = Path(course_directory)
+        self.on_progress = on_progress
         
         # Set the output directory; default to 'lms_output' inside the course directory if not specified
         if output_directory is None:
@@ -73,7 +75,7 @@ class MigrationPipeline:
         start_time = time.time()
         
         print("=" * 80)
-        print("CANVAS → TUTOR LMS MIGRATION PIPELINE \ NextGen LMS v2.0")
+        print("CANVAS -> TUTOR LMS MIGRATION PIPELINE \ NextGen LMS v2.0")
         print("=" * 80)
         print()
         
@@ -81,12 +83,14 @@ class MigrationPipeline:
             # Stage 1: Validation & Inventory
             # Before we start, we ensure the Canvas export folder has all required files (like imsmanifest.xml).
             print("[1/5] Validating Canvas export structure...")
+            if self.on_progress: self.on_progress("validating", 10, "Validating Canvas export structure...")
             validation_report = self._stage_1_validate()
             self.report.validation_report = validation_report
             
             # If validation fails, we stop immediately to avoid processing corrupt data.
             if not validation_report.passed:
                 print("[FAIL] Validation failed. See report for details.")
+                if self.on_progress: self.on_progress("validating", 10, "Validation failed.")
                 self.report.status = ReportStatus.FAILURE
                 return self._finalize_report(start_time)
             
@@ -98,12 +102,14 @@ class MigrationPipeline:
             # Stage 2: Semantic Parsing
             # We read the XML files and convert them into our internal Python models.
             print("[2/5] Parsing Canvas content...")
+            if self.on_progress: self.on_progress("parsing", 30, "Parsing Canvas content...")
             canvas_course, parse_report = self._stage_2_parse()
             self.report.parse_report = parse_report
             
             # If we couldn't parse the course structure, we shouldn't continue.
             if canvas_course is None:
                 print("[FAIL] Parsing failed. See report for details.")
+                if self.on_progress: self.on_progress("parsing", 30, "Parsing failed.")
                 self.report.status = ReportStatus.FAILURE
                 return self._finalize_report(start_time)
             
@@ -122,6 +128,7 @@ class MigrationPipeline:
             # This is where we map Canvas-specific fields to Tutor LMS-compatible fields.
             # It also handles rewriting internal links and fixing asset paths.
             print("[3/5] Transforming to Tutor LMS format...")
+            if self.on_progress: self.on_progress("transforming", 60, "Transforming to Tutor LMS format...")
             tutor_course, transformation_report = self._stage_4_transform(canvas_course)
             self.report.transformation_report = transformation_report
             
@@ -131,6 +138,7 @@ class MigrationPipeline:
             print(f"[DONE] Transformed to Tutor LMS")
             print(f"  - Topics: {len(tutor_course.topics)}")
             print(f"  - Lessons: {transformation_report.lessons_created}")
+            print(f"  - Assignments: {transformation_report.assignments_created}")
             print(f"  - Quizzes: {transformation_report.quizzes_created}")
             print(f"  - Questions: {transformation_report.questions_created}")
             print()
@@ -138,6 +146,7 @@ class MigrationPipeline:
             # Stage 5: Export & Verification
             # Finally, we save the memory-resident models into physical JSON and HTML files.
             print("[4/5] Exporting to JSON...")
+            if self.on_progress: self.on_progress("exporting", 80, "Exporting to JSON...")
             verification_report = self._stage_5_export(tutor_course)
             self.report.verification_report = verification_report
             
@@ -147,6 +156,7 @@ class MigrationPipeline:
             
             # Generate human-readable reports for the user.
             print("[5/5] Generating migration reports...")
+            if self.on_progress: self.on_progress("finalizing", 95, "Generating migration reports...")
             self._generate_reports()
             
             print("[DONE] Reports generated")

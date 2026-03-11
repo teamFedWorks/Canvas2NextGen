@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NextGen LMS | Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:,">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+    <div class="app-wrapper">
+        <aside class="sidebar">
+            <div class="logo-container">
+                <i data-lucide="rocket" class="logo-icon"></i>
+                <h1>NextGen <span>LMS</span></h1>
+            </div>
+            <nav class="side-nav">
+                <a href="#" class="active"><i data-lucide="layout-dashboard"></i> Dashboard</a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="page-title">
+                    <h2>Dashboard</h2>
+                </div>
+            </header>
+
+            <section class="stats-grid">
+                <div class="stat-card primary">
+                    <div class="stat-header">
+                        <span>Number of zip</span>
+                    </div>
+                    <div class="stat-value" id="stats-total">0</div>
+                    <div class="stat-footer">
+                        <span class="label">Course uploads this session</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span>Completed Migrations</span>
+                    </div>
+                    <div class="stat-value" id="stats-ended">0</div>
+                    <div class="stat-footer">
+                        <span class="label">Total finished courses</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span>Active Migrations</span>
+                    </div>
+                    <div class="stat-value" id="stats-running">0</div>
+                    <div class="stat-footer">
+                        <span class="label">Currently being processed</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span>Queued Migrations</span>
+                    </div>
+                    <div class="stat-value" id="stats-pending">0</div>
+                    <div class="stat-footer">
+                        <span class="label">Awaiting processing</span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="dashboard-grid">
+                <div class="col-main">
+                    <section class="project-list-card card">
+                        <div class="card-header">
+                            <h3>Migration Queue</h3>
+                            <div class="upload-dropzone" id="drop-zone">
+                                <i data-lucide="upload-cloud"></i>
+                                <span>Drop ZIP to Migrate</span>
+                                <input type="file" id="file-input" hidden accept=".zip">
+                            </div>
+                        </div>
+                        <div id="task-list" class="mini-task-list">
+                            <div class="empty-state">No migrations found.</div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Hidden progress container needed by JS -->
+    <div id="upload-progress" style="display:none">
+        <div class="progress-bar"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

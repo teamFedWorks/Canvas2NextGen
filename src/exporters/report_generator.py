@@ -186,14 +186,21 @@ class ReportGenerator:
     def _generate_content_table_rows(self, report: MigrationReport) -> str:
         """Generate table rows for content comparison"""
         rows = []
-        content_types = ['lessons', 'quizzes', 'assignments', 'questions', 'topics']
+        # Mapping: label, source_key (Canvas), target_key (Tutor)
+        entities = [
+            ('Modules', 'modules', 'topics'),
+            ('Pages', 'pages', 'lessons'),
+            ('Assignments', 'assignments', 'assignments'),
+            ('Quizzes', 'quizzes', 'quizzes'),
+            ('Questions', 'questions', 'questions')
+        ]
         
-        for content_type in content_types:
-            source_count = report.source_content_counts.get(content_type, 0)
-            migrated_count = report.migrated_content_counts.get(content_type, 0)
+        for label, source_key, target_key in entities:
+            source_count = report.source_content_counts.get(source_key, 0)
+            migrated_count = report.migrated_content_counts.get(target_key, 0)
             rows.append(f"""
             <tr>
-                <td>{content_type.capitalize()}</td>
+                <td>{label}</td>
                 <td>{source_count}</td>
                 <td>{migrated_count}</td>
             </tr>
