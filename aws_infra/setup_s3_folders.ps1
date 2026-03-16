@@ -2,12 +2,12 @@ $BucketName = "eduvatehub-courseshells-prod"
 
 $Paths = @(
     "Institutions/",
-    "Institutions/SFC-university/",
-    "Institutions/SFC-university/programs/",
-    "Institutions/SFC-university/programs/bs-computer-science/",
-    "Institutions/SFC-university/programs/bs-computer-science/courses/",
-    "Institutions/SFC-university/programs/bs-information-technology/",
-    "Institutions/SFC-university/programs/bs-information-technology/courses/"
+    "Institutions/SFC/",
+    "Institutions/SFC/programs/",
+    "Institutions/SFC/programs/bs-computer-science/",
+    "Institutions/SFC/programs/bs-computer-science/courses/",
+    "Institutions/SFC/programs/bs-information-technology/",
+    "Institutions/SFC/programs/bs-information-technology/courses/"
 )
 
 foreach ($Path in $Paths) {
