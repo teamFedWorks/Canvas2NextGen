@@ -95,7 +95,7 @@ class CourseTransformer:
             
             elif item.content_type == 'quiz' and item.identifier in quizzes_map:
                 quiz = quizzes_map[item.identifier]
-                lms_quiz = self._transform_quiz(quiz, index)
+                lms_quiz = self._transform_quiz(quiz, index, report)
                 lms_module.quizzes.append(lms_quiz)
                 
             elif item.content_type == 'assignment' and item.identifier in assignments_map:
@@ -112,7 +112,7 @@ class CourseTransformer:
 
         return lms_module
 
-    def _transform_quiz(self, c_quiz: CanvasQuiz, order: int) -> LmsQuiz:
+    def _transform_quiz(self, c_quiz: CanvasQuiz, order: int, report: TransformationReport) -> LmsQuiz:
         """Transforms a Canvas quiz to an LMS quiz."""
         lms_quiz = LmsQuiz(
             title=c_quiz.title,
@@ -129,7 +129,7 @@ class CourseTransformer:
             lms_q = LmsQuestion(
                 title=c_q.title,
                 text=c_q.question_text,
-                question_type=self._map_question_type(c_q.question_type),
+                question_type=self._map_question_type(c_q.question_type, report),
                 points=c_q.points_possible,
                 order=q_idx,
                 canvas_id=c_q.identifier
@@ -148,8 +148,8 @@ class CourseTransformer:
             
         return lms_quiz
 
-    def _map_question_type(self, c_type: Any) -> LmsQuestionType:
-        """Maps Canvas question types to our internal Enums."""
+    def _map_question_type(self, c_type: Any, report: TransformationReport) -> LmsQuestionType:
+        """Maps Canvas question types to our internal Enums with warning tracking."""
         from ..models.canvas_models import QuestionType
         
         mapping = {
@@ -161,7 +161,14 @@ class CourseTransformer:
             QuestionType.MATCHING: LmsQuestionType.MATCHING,
             QuestionType.ORDERING: LmsQuestionType.ORDERING
         }
-        return mapping.get(c_type, LmsQuestionType.MULTIPLE_CHOICE)
+        
+        if c_type not in mapping:
+            msg = f"Unsupported Canvas QuestionType '{c_type}' fallback to 'Essay'"
+            report.warnings.append(msg)
+            logger.log("WARNING", msg)
+            return LmsQuestionType.ESSAY
+            
+        return mapping[c_type]
 
     def _slugify(self, text: str) -> str:
         """Standard slug generator."""

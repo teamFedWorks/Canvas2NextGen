@@ -17,10 +17,14 @@ from edu_onboarding.observability.logger import get_logger
 
 logger = get_logger(__name__)
 
-def process_single_key(key, downloader, worker, info):
-    """Worker function for parallel processing."""
+def process_single_key(key, info):
+    """Worker function for parallel processing (Multiprocessing safe)."""
     course_name = Path(key).stem
-    university_id, author_id = info
+    university_id, author_id, cdn_url, ingestion_bucket, s3_cdn_bucket = info
+    
+    # 1. Lazy-init workers inside the process
+    downloader = S3Downloader(bucket=ingestion_bucket)
+    worker = IngestionWorker(s3_bucket=s3_cdn_bucket, cdn_url=cdn_url)
     
     # Create a local temp storage for the download
     temp_dir = Path(f"storage/temp_s3/{os.getpid()}_{hash(key) % 1000}")
@@ -40,7 +44,7 @@ def process_single_key(key, downloader, worker, info):
         )
         
         if result.get("status") == "success":
-            print(f"[SUCCESS] {course_name}: Course ID {result.get('course_id')}")
+            print(f"[SUCCESS] {course_name}: Task ID {result.get('task_id')}")
             return True
         else:
             print(f"[FAILED] {course_name}: {result.get('error')}")
@@ -52,19 +56,18 @@ def process_single_key(key, downloader, worker, info):
         return False
         
     finally:
-        # Cleanup temp directory for this specific item
         if temp_dir.exists():
             import shutil
             shutil.rmtree(temp_dir)
 
 def main():
-    """Batch process courses directly from S3 with parallelism."""
+    """Batch process courses directly from S3 with true process-level parallelism."""
     parser = argparse.ArgumentParser(description="Parallel S3 Course Ingestion")
     parser.add_argument("--keys", nargs="+", help="Manually specify S3 keys to process")
     parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers (default: 4)")
     args = parser.parse_args()
 
-    # S3 Configuration
+    # S3 Configuration from .env
     ingestion_bucket = os.getenv("S3_INGESTION_BUCKET")
     s3_cdn_bucket = os.getenv("S3_CDN_BUCKET", "eduvatehub-assets-cdn")
     cdn_url = os.getenv("CDN_URL", "https://assets.eduvatehub.com")
@@ -77,32 +80,27 @@ def main():
     author_id = "64f1a2b3c4d5e6f7a8b9c0d2"
 
     print("=" * 80)
-    print(f"S3 BATCH MIGRATION (Parallelism: {args.workers})")
+    print(f"S3 BATCH MIGRATION (Process-level Parallelism: {args.workers})")
     print("=" * 80)
     print(f"Bucket: {ingestion_bucket}")
     print()
 
+    # Initial scan (IO-bound, single threaded is fine)
     downloader = S3Downloader(bucket=ingestion_bucket)
-    worker = IngestionWorker(s3_bucket=s3_cdn_bucket, cdn_url=cdn_url)
-
-    # 1. Determine Keys
     if args.keys:
         s3_keys = args.keys
-        print(f"Manual mode: Processing {len(s3_keys)} specified keys.")
     else:
         print(f"Scanning S3 bucket: {ingestion_bucket}...")
         s3_keys = downloader.list_courses()
         if not s3_keys:
             print("No .zip files found in S3 bucket.")
             return
-        print(f"Auto mode: Found {len(s3_keys)} packages in S3.")
 
-    print("-" * 40)
-
-    # 2. Parallel Processing
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-        info = (university_id, author_id)
-        futures = [executor.submit(process_single_key, key, downloader, worker, info) for key in s3_keys]
+    # 2. Parallel Processing using ProcessPoolExecutor to bypass GIL
+    info = (university_id, author_id, cdn_url, ingestion_bucket, s3_cdn_bucket)
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as executor:
+        futures = [executor.submit(process_single_key, key, info) for key in s3_keys]
         
         results = []
         for future in concurrent.futures.as_completed(futures):

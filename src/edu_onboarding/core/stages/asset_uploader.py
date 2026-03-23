@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from ...models.lms_models import LmsCourse, LmsModule, LmsLesson, LmsQuiz, LmsAssignment
 from ...config.lms_schemas import UPLOADABLE_EXTENSIONS, S3_KEY_TEMPLATE
 from ...observability.logger import get_logger
+from ...utils.resilience import retry
 
 logger = get_logger(__name__)
 
@@ -30,26 +31,21 @@ class AssetUploader:
         course_id: str, 
         source_dir: Path, 
         s3_bucket: str, 
-        cdn_base_url: str = ""
+        cdn_base_url: str = "",
+        pre_uploaded_assets: Optional[Dict[str, str]] = None
     ):
         """
         Initialize the uploader.
-
-        Args:
-            course_id: The unique identifier for the course (used in S3 path).
-            source_dir: The root directory of the unzipped Canvas export.
-            s3_bucket: The target S3 bucket name.
-            cdn_base_url: The base URL for the CDN (e.g., https://cdn.lms.com).
         """
         self.course_id = course_id
-        self.source_dir = source_dir
+        self.source_dir = Path(source_dir)
         self.s3_bucket = s3_bucket
         self.cdn_base_url = cdn_base_url.rstrip('/')
         
         self.s3_client = boto3.client('s3')
         
-        # Track uploaded files to avoid redundant uploads in the same run
-        self.uploaded_assets: Dict[str, str] = {}  # local_path -> s3_url
+        # Track uploaded files. Pre-populate for resumability.
+        self.uploaded_assets: Dict[str, str] = pre_uploaded_assets or {}
         
         # Stats
         self.stats = {
@@ -101,13 +97,12 @@ class AssetUploader:
         soup = BeautifulSoup(html_content, 'html.parser')
         modified = False
 
-        # Find all tags that can have local file references
-        # src: img, video, source, iframe, script, embed
-        # href: a, link
+        # 1. Tag-based rewriting
         tags_attrs = [
             ('img', 'src'),
             ('video', 'src'),
             ('source', 'src'),
+            ('track', 'src'),
             ('a', 'href'),
             ('iframe', 'src'),
             ('embed', 'src')
@@ -116,26 +111,50 @@ class AssetUploader:
         for tag_name, attr in tags_attrs:
             for tag in soup.find_all(tag_name):
                 url = tag.get(attr)
-                if not url:
-                    continue
-
-                # We only care about local paths (Canvas export typically uses relative paths)
-                if self._is_local_asset(url):
+                if url and self._is_local_asset(url):
                     s3_url = self._upload_asset(url)
                     if s3_url:
                         tag[attr] = s3_url
                         modified = True
-                        # Defensive: Ensure asset_list is valid before appending
-                        if asset_list is not None and isinstance(asset_list, list):
-                            try:
-                                asset_list.append(s3_url)
-                            except AttributeError as e:
-                                logger.warning(
-                                    "Failed to append to asset_list",
-                                    extra={"error": str(e), "asset_list_type": type(asset_list)}
-                                )
+                        if asset_list is not None:
+                            asset_list.append(s3_url)
+
+        # 2. Inline Style Rewriting (e.g., style="background-image: url(...)")
+        for tag in soup.find_all(style=True):
+            style_content = tag['style']
+            new_style, was_changed = self._process_css_text(style_content)
+            if was_changed:
+                tag['style'] = new_style
+                modified = True
+
+        # 3. Internal Style Tag Rewriting
+        for style_tag in soup.find_all('style'):
+            if style_tag.string:
+                new_css, was_changed = self._process_css_text(style_tag.string)
+                if was_changed:
+                    style_tag.string.replace_with(new_css)
+                    modified = True
 
         return str(soup) if modified else html_content
+
+    def _process_css_text(self, css_text: str) -> Tuple[str, bool]:
+        """Scan CSS text for url() patterns and rewrite them."""
+        # Regex to find url('...') or url("...") or url(...)
+        pattern = r'url\(\s*[\'"]?([^\'"]+?)[\'"]?\s*\)'
+        modified = False
+        
+        def replace_url(match):
+            nonlocal modified
+            original_url = match.group(1)
+            if self._is_local_asset(original_url):
+                s3_url = self._upload_asset(original_url)
+                if s3_url:
+                    modified = True
+                    return f"url('{s3_url}')"
+            return match.group(0)
+
+        new_css = re.sub(pattern, replace_url, css_text)
+        return new_css, modified
 
     def _is_local_asset(self, url: str) -> bool:
         """Check if a URL refers to a local file in the Canvas package."""
@@ -147,6 +166,7 @@ class AssetUploader:
         ext = os.path.splitext(url.split('?')[0])[1].lower()
         return ext in UPLOADABLE_EXTENSIONS
 
+    @retry(max_attempts=3, base_delay=1)
     def _upload_asset(self, relative_path: str) -> Optional[str]:
         """
         Uploads a local file to S3 if not already uploaded.
