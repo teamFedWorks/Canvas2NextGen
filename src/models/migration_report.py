@@ -182,6 +182,7 @@ class TransformationReport:
     
     # Errors
     errors: List[MigrationError] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
 
 @dataclass
