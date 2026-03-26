@@ -57,6 +57,7 @@ class IngestionWorker:
             return {"status": "failed", "error": f"Unsupported source type: {source_type}"}
 
         adapter = self.adapters[source_type]
+        canvas_course = None
         
         try:
             # 1. Load & Parse through Adapter

@@ -116,14 +116,24 @@ class MongoDBExporter:
                        size_mb=size_bytes/(1024*1024))
             raise ValueError(f"Course document too large ({size_bytes} bytes).")
 
-        # 3. Export
-        result = collection.insert_one(course_data)
+        # 3. Export (Upsert based on slug to support --force)
+        slug = course_data.get('slug')
+        if slug:
+            result = collection.replace_one(
+                {"slug": slug},
+                course_data,
+                upsert=True
+            )
+            inserted_id = result.upserted_id or collection.find_one({"slug": slug})["_id"]
+        else:
+            result = collection.insert_one(course_data)
+            inserted_id = result.inserted_id
         
         logger.log("INFO", "Course exported to MongoDB", 
-                   course_id=str(result.inserted_id), 
+                   course_id=str(inserted_id), 
                    title=course_data.get('title'))
                    
-        return str(result.inserted_id)
+        return str(inserted_id)
 
     def find_by_checksum(self, checksum: str) -> Optional[Dict[str, Any]]:
         self._ensure_connection()

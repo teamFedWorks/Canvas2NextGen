@@ -38,13 +38,12 @@ class CanvasAdapter:
         
         self.api_token = api_token or os.getenv("CANVAS_API_TOKEN")
         
-        if not self.api_token:
-            raise ValueError("CANVAS_API_TOKEN is not configured.")
-            
-        self.headers = {
-            "Authorization": f"Bearer {self.api_token}",
-            "Accept": "application/json"
-        }
+        self.headers = {}
+        if self.api_token:
+            self.headers = {
+                "Authorization": f"Bearer {self.api_token}",
+                "Accept": "application/json"
+            }
         
         # Hardening settings
         self.max_pages = 1000
@@ -64,6 +63,9 @@ class CanvasAdapter:
         """
         Extracts a complete course structure from Canvas API.
         """
+        if not self.api_token:
+            raise ValueError("CANVAS_API_TOKEN is not configured. Cannot perform Canvas API ingestion.")
+            
         logger.info(f"[CanvasAdapter] Extracting Course {course_id} from API")
         
         # 1. Basic Course Info

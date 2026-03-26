@@ -58,6 +58,9 @@ tutor_lms_output/
 output/
 **/tutor_lms_output/
 
+# Upload data — large course content, not tracked in git
+storage/uploads/
+
 # Course data (optional - uncomment if you don't want to track course exports)
 # cs-*/
 # it-*/
