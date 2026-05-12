@@ -59,9 +59,8 @@ output/
 **/tutor_lms_output/
 
 # Upload data — large course content, not tracked in git
+storage/
 storage/uploads/
-
-# Pipeline outputs — validation reports, ingestion outputs, temp files
 storage/outputs/
 storage/temp_s3/
 

@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libxml2-dev \
     libxslt-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements file first to leverage Docker cache
@@ -20,15 +21,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . .
 
-# Create directory for course storage and output
-RUN mkdir -p /app/storage/uploads /app/storage/outputs
+# Create a minimal temp directory for in-flight processing only
+# (uploads and outputs go directly to S3 - this is just for transient scratch space)
+RUN mkdir -p /app/storage/tmp
 
 # Expose the API port
 EXPOSE 5009
 
 # Set environment variables
 ENV PYTHONPATH=/app
-ENV STORAGE_DIR=/app/storage
+ENV STORAGE_DIR=/app/storage/tmp
 ENV PORT=5009
 
 # Start the FastAPI application via the unified server entry point

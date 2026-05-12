@@ -2,6 +2,7 @@ import zipfile
 import os
 import shutil
 from pathlib import Path
+from utils.zip_utils import safe_extractall
 
 upload_dir = Path(r"B:\EduvateHub\CourseOnboarding\storage\uploads")
 temp_extract = upload_dir / "temp_standardize"
@@ -25,7 +26,7 @@ def standardize_course(course_code: str, search_pattern: str):
     temp_extract.mkdir()
     
     with zipfile.ZipFile(inner_zip, 'r') as z:
-        z.extractall(temp_extract)
+        safe_extractall(z, temp_extract)
     
     # Check if there's a manifest
     if not (temp_extract / "imsmanifest.xml").exists():

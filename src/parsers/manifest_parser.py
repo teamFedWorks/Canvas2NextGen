@@ -151,6 +151,17 @@ class ManifestParser:
             res_type = get_element_attribute(resource_elem, 'type')
             
             if identifier:
+                # Normalise the href: replace Unicode non-breaking / narrow
+                # no-break spaces (U+00A0, U+202F) with regular spaces so
+                # Path resolution works on all platforms.  Canvas sometimes
+                # encodes filenames with these characters in the manifest.
+                if href:
+                    href = (
+                        href
+                        .replace('\u00a0', ' ')   # NO-BREAK SPACE
+                        .replace('\u202f', ' ')   # NARROW NO-BREAK SPACE
+                    )
+
                 # Check if file exists
                 file_exists = False
                 resolved_path = None
@@ -158,13 +169,40 @@ class ManifestParser:
                 if href:
                     file_path = self.course_directory / href
                     file_exists = file_path.exists()
+                    if not file_exists:
+                        # Windows cannot create paths with colons — zip extractors
+                        # replace ':' with '_'.  Try the sanitised variant.
+                        sanitised = href.replace(':', '_')
+                        if sanitised != href:
+                            alt_path = self.course_directory / sanitised
+                            if alt_path.exists():
+                                href = sanitised
+                                file_path = alt_path
+                                file_exists = True
                     if file_exists:
                         resolved_path = str(file_path)
+                
+                # Extract nested <file> tags for embedded assets
+                nested_files = []
+                file_elems = resource_elem.findall('./file')
+                if not file_elems:
+                    file_elems = find_elements(resource_elem, './imscc:file', IMS_CC_NAMESPACES)
+                for f_elem in file_elems:
+                    f_href = get_element_attribute(f_elem, 'href')
+                    if f_href:
+                        f_href = f_href.replace('\u00a0', ' ').replace('\u202f', ' ')
+                        f_path = self.course_directory / f_href
+                        if not f_path.exists():
+                            f_sanitised = f_href.replace(':', '_')
+                            if (self.course_directory / f_sanitised).exists():
+                                f_href = f_sanitised
+                        nested_files.append(f_href)
                 
                 resource = CanvasResource(
                     identifier=identifier,
                     href=href,
                     type=res_type,
+                    files=nested_files,
                     file_exists=file_exists,
                     resolved_path=resolved_path
                 )
@@ -324,7 +362,7 @@ class ManifestParser:
                     content_type = 'assignment'
                 elif 'webcontent' in res_type:
                     content_type = 'page'
-                elif 'discussion' in res_type:
+                elif 'discussion' in res_type or 'imsdt' in res_type:
                     content_type = 'discussion'
                 elif 'weblink' in res_type or 'imswl' in res_type:
                     content_type = 'weblink'

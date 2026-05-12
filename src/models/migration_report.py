@@ -238,6 +238,9 @@ class MigrationReport:
     resolution_report: Optional[ResolutionReport] = None
     transformation_report: Optional[TransformationReport] = None
     verification_report: Optional[VerificationReport] = None
+
+    # Pre-ingest audit summary (Fix 5)
+    pre_ingest_audit: Optional[Dict[str, Any]] = None
     
     # Aggregated errors
     all_errors: List[MigrationError] = field(default_factory=list)
@@ -294,4 +297,5 @@ class MigrationReport:
             "errors": self.total_errors,
             "warnings": self.total_warnings,
             "execution_time_seconds": self.execution_time_seconds,
+            "pre_ingest_audit": self.pre_ingest_audit or {},
         }

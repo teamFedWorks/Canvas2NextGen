@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
-from .router import router
+from .router_enhanced import router as canonical_router
+from .middleware_enhanced import TracingMiddleware
 
 app = FastAPI(
-    title="NextGen LMS Migration Service",
-    description="Microservice for orchestrating Canvas course migrations to NextGen LMS.",
-    version="2.0.0"
+    title="Canonical LMS Migration Service",
+    description="Enterprise-grade multi-LMS ingestion platform with canonical normalization, orchestration, and observability.",
+    version="3.0.0"
 )
 
 # Configure CORS
@@ -19,8 +20,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include migration routes
-app.include_router(router, prefix="/api/v1")
+# Add distributed tracing middleware
+app.add_middleware(TracingMiddleware)
+
+# Include canonical migration routes
+app.include_router(canonical_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

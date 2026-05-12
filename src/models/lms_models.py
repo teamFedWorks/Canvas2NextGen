@@ -88,6 +88,12 @@ class LmsQuizConfig:
     attemptsAllowed: int = 1
     showResultsOnFinish: bool = True
     showCorrectAnswers: bool = False
+    # Respondus LockDown Browser requirement — read from assessment_meta.xml.
+    # True means students must have Respondus installed to take this quiz.
+    # The quiz questions are fully imported; only this browser setting needs
+    # manual configuration in the target LMS.
+    requireLockdownBrowser: bool = False
+    requireLockdownBrowserForResults: bool = False
 
 
 @dataclass
@@ -96,6 +102,34 @@ class LmsAttachment:
     url: str
     size: str = "0MB"
     type: str = "UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# Quiz Question Models
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LmsQuestionAnswer:
+    """A single answer choice for a quiz question."""
+    id: str
+    text: str
+    isCorrect: bool = False
+    feedback: Optional[str] = None
+
+
+@dataclass
+class LmsQuestion:
+    """
+    A quiz question stored under a curriculum item.
+    Mapped from CanvasQuestion during transformation.
+    """
+    identifier: str
+    text: str          # HTML question prompt
+    type: str          # multiple_choice, true_false, essay, short_answer, etc.
+    points: float = 1.0
+    answers: List[LmsQuestionAnswer] = field(default_factory=list)
+    generalFeedback: Optional[str] = None
+    position: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -113,11 +147,19 @@ class LmsCurriculumItem:
     settings: LmsSettings = field(default_factory=LmsSettings)
     content: str = ""
     attachments: List[LmsAttachment] = field(default_factory=list)
-    
+
+    # Explicit ordering field — prevents silent reordering when MongoDB
+    # returns documents in a different sequence.
+    position: int = 0
+
     # Optional configs based on type
     quizConfig: Optional[LmsQuizConfig] = None
     assignmentConfig: Optional[LmsAssignmentConfig] = None
-    
+
+    # Quiz questions — populated for Quiz items during transformation.
+    # Stored inline under the course document (Phase 1 fix).
+    questions: List[LmsQuestion] = field(default_factory=list)
+
     # Traceability (not in target JSON but kept for internal use)
     _canvasId: Optional[str] = field(default=None, metadata={"export": False})
     _content_ref: Optional[str] = field(default=None, metadata={"export": False})

@@ -12,7 +12,7 @@ from pptx import Presentation
 
 from models.canvas_models import CanvasPage, WorkflowState
 from models.migration_report import MigrationError, ErrorSeverity
-from utils.html_utils import clean_html
+from utils.html_utils import sanitize_html
 
 
 class PptxParser:
@@ -149,7 +149,7 @@ class PptxParser:
 
             # Title
             if slide.shapes.title and slide.shapes.title.text.strip():
-                html_parts.append(f'<h2>{clean_html(slide.shapes.title.text)}</h2>')
+                html_parts.append(f'<h2>{sanitize_html(slide.shapes.title.text)}</h2>')
 
             # Body shapes
             for shape in slide.shapes:
@@ -157,7 +157,7 @@ class PptxParser:
                     continue
                 if not (hasattr(shape, "text") and shape.text.strip()):
                     continue
-                text = clean_html(shape.text)
+                text = sanitize_html(shape.text)
                 if '\n' in text:
                     items = [l.strip() for l in text.split('\n') if l.strip()]
                     html_parts.append('<ul>')
@@ -173,7 +173,7 @@ class PptxParser:
                     html_parts.append(
                         f'<div class="ppt-notes" style="background:#f9f9f9;padding:10px;'
                         f'margin-top:10px;font-size:0.9em;color:#666;">'
-                        f'<strong>Notes:</strong> {clean_html(notes)}</div>'
+                        f'<strong>Notes:</strong> {sanitize_html(notes)}</div>'
                     )
 
             html_parts.append('</div><hr>')

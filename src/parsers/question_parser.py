@@ -14,7 +14,7 @@ from models.canvas_models import (
 )
 from models.migration_report import MigrationError, ErrorSeverity
 from utils.xml_utils import parse_xml_file, find_element, find_elements, get_element_text, get_element_attribute, get_inner_html
-from utils.html_utils import clean_html
+from utils.html_utils import sanitize_html
 
 
 class QuestionParser:
@@ -116,17 +116,17 @@ class QuestionParser:
         # Try itemBody first (QTI standard)
         item_body = find_element(root, './/itemBody', {})
         if item_body is not None:
-            return clean_html(get_inner_html(item_body))
+            return sanitize_html(get_inner_html(item_body))
         
         # Fallback to presentation/material
         material = find_element(root, './/presentation//material', {})
         if material is not None:
-            return clean_html(get_inner_html(material))
+            return sanitize_html(get_inner_html(material))
         
         # Fallback to question_text
         question_text = find_element(root, './/question_text', {})
         if question_text is not None:
-            return clean_html(get_element_text(question_text, ""))
+            return sanitize_html(get_element_text(question_text, ""))
         
         return ""
     
@@ -211,9 +211,9 @@ class QuestionParser:
             # Extract text from material/mattext (QTI 1.2) or inner HTML (QTI 2.x)
             mattext = find_element(choice, './/mattext', {})
             if mattext is not None:
-                answer_text = clean_html(get_element_text(mattext, ""))
+                answer_text = sanitize_html(get_element_text(mattext, ""))
             else:
-                answer_text = clean_html(get_inner_html(choice))
+                answer_text = sanitize_html(get_inner_html(choice))
             
             if not answer_text and not answer_id:
                 continue
@@ -253,11 +253,11 @@ class QuestionParser:
         """Extract general feedback"""
         feedback_elem = find_element(root, './/generalFeedback', {})
         if feedback_elem is not None:
-            return clean_html(get_inner_html(feedback_elem))
+            return sanitize_html(get_inner_html(feedback_elem))
         
         # Try modalFeedback
         modal_feedback = find_element(root, './/modalFeedback', {})
         if modal_feedback is not None:
-            return clean_html(get_inner_html(modal_feedback))
+            return sanitize_html(get_inner_html(modal_feedback))
         
         return None

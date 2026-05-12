@@ -63,11 +63,13 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".bmp", ".
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".ogv", ".mov", ".avi", ".mkv"}
 DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
 # Additional file types that should be uploaded as downloadable attachments
-DOWNLOAD_EXTENSIONS = {".ipynb", ".csv", ".zip", ".txt", ".rb", ".py", ".js", ".json"}
+DOWNLOAD_EXTENSIONS = {".ipynb", ".csv", ".zip", ".txt", ".rb", ".py", ".js", ".json", ".html", ".htm"}
 UPLOADABLE_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | DOCUMENT_EXTENSIONS | DOWNLOAD_EXTENSIONS
 
 # ---------------------------------------------------------------------------
 # S3 key prefix template
-# Usage: S3_KEY_TEMPLATE.format(course_id=..., filename=...)
+# Usage: S3_KEY_TEMPLATE.format(institution=..., course_id=..., filename=...)
+# Assets are stored under {institution}/{course_id}/ so SFC and WBU assets
+# are cleanly separated in the CDN bucket.
 # ---------------------------------------------------------------------------
-S3_KEY_TEMPLATE = "{course_id}/{filename}"
+S3_KEY_TEMPLATE = "{institution}/{course_id}/{filename}"

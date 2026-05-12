@@ -18,6 +18,7 @@ from core.pipeline import MigrationPipeline
 from exporters.mongodb_exporter import MongoDBExporter
 from worker.ingestion_worker import IngestionWorker
 from observability.logger import get_logger
+from utils.zip_utils import safe_extractall
 
 logger = get_logger(__name__)
 
@@ -81,7 +82,7 @@ class MigrationService:
             self._update_progress(task_id, "processing", "Extracting package...", 5)
             import zipfile
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                safe_extractall(zip_ref, extract_dir)
             
             # Step 3: Run Pipeline
             output_dir = self.outputs_dir / task_id
@@ -143,7 +144,7 @@ class MigrationService:
                 self._update_progress(task_id, "processing", "Extracting package...", 10)
                 import zipfile
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_dir)
+                    safe_extractall(zip_ref, extract_dir)
 
                 # Pipeline
                 output_dir = self.outputs_dir / task_id

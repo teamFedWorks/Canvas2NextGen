@@ -88,29 +88,22 @@ class Parser:
             report.errors.extend(self.manifest_parser.errors)
             return None, report
         
-        # Step 2: Parse wiki pages.
-        pages = self.page_parser.parse_all_pages()
-        
-        referenced_files = set()
+        # Step 2: Parse wiki pages AND web_resources HTML pages.
+        # Build href → resource-ID map from the manifest so the page parser
+        # can key every page (including web_resources HTML files) by its
+        # manifest resource identifier rather than its filename stem.
+        # This replaces the old post-parse re-keying loop — identifiers are
+        # assigned correctly at parse time now.
+        resource_href_map: Dict[str, str] = {}
         if course.resources:
-            referenced_files = set(r.href for r in course.resources.values() if r.href)
-
-            # Build a map: href_stem -> resource_identifier
-            # This lets us re-key pages from their filename stem to the resource ID
-            # so the transformer can look them up by _content_ref (identifierref).
-            href_stem_to_res_id: Dict[str, str] = {}
             for res_id, resource in course.resources.items():
                 if resource.href:
-                    stem = Path(resource.href).stem.lower()
-                    href_stem_to_res_id[stem] = res_id
+                    resource_href_map[resource.href] = res_id
 
-            # Re-key pages: replace file-stem identifier with the resource identifier
-            for page in pages:
-                stem_key = page.identifier.lower()
-                if stem_key in href_stem_to_res_id:
-                    page.identifier = href_stem_to_res_id[stem_key]
+        pages = self.page_parser.parse_all_pages(resource_href_map=resource_href_map)
 
-            # Process PPTX webcontent resources
+        if course.resources:
+            # Process PPTX webcontent resources (convert slides → HTML pages)
             for res_id, resource in course.resources.items():
                 if resource.type and 'webcontent' in resource.type.lower():
                     if resource.href and resource.href.lower().endswith('.pptx'):
@@ -120,12 +113,12 @@ class Parser:
                             pptx_page = self.pptx_parser.parse_pptx(file_path, identifier=res_id)
                             if pptx_page:
                                 pages.append(pptx_page)
-        
+
         course.pages = pages
         report.pages_parsed = len(pages)
         report.errors.extend(self.page_parser.errors)
         report.errors.extend(self.pptx_parser.errors)
-        
+
         # Step 3: Parse assignments.
         # Assignments are usually in their own subfolders with metadata and instructions.
         assignments = self.assignment_parser.find_all_assignments()
@@ -146,25 +139,42 @@ class Parser:
         report.errors.extend(self.quiz_parser.errors)
         report.errors.extend(self.quiz_parser.question_parser.errors)
         
-        # Step 5: Parse discussions and web links identified in resources
+        # Step 5: Parse discussions and web links identified in resources.
+        # Canvas exports weblinks/discussions in two ways:
+        #   (a) resource has href pointing to the XML file  → use it directly
+        #   (b) resource has no href (empty) → file is at course_root/{res_id}.xml
         discussions = []
         weblinks = []
         for res_id, resource in course.resources.items():
-            if not resource.href:
+            if not resource.type:
                 continue
-            file_path = self.course_directory / resource.href
+
+            is_discussion = 'discussion' in resource.type.lower() or 'imsdt' in resource.type.lower()
+            is_weblink    = 'weblink' in resource.type.lower() or 'imswl' in resource.type.lower()
+
+            if not (is_discussion or is_weblink):
+                continue
+
+            # Resolve the file path: use href if present, else fall back to {res_id}.xml
+            if resource.href:
+                file_path = self.course_directory / resource.href
+            else:
+                # Canvas often exports these with no href — the file sits at the root
+                # named after the resource identifier
+                file_path = self.course_directory / f"{res_id}.xml"
+
             if not file_path.exists():
                 continue
-                
-            if resource.type and 'discussion' in resource.type.lower():
+
+            if is_discussion:
                 discussion = self.discussion_parser.parse_discussion(file_path)
                 if discussion:
-                    discussion.identifier = res_id # Keep manifest ID
+                    discussion.identifier = res_id  # Keep manifest ID
                     discussions.append(discussion)
-            elif resource.type and 'weblink' in resource.type.lower():
+            elif is_weblink:
                 weblink = self.weblink_parser.parse_weblink(file_path)
                 if weblink:
-                    weblink.identifier = res_id # Keep manifest ID
+                    weblink.identifier = res_id  # Keep manifest ID
                     weblinks.append(weblink)
         
         course.discussions = discussions
@@ -176,7 +186,23 @@ class Parser:
         # Sometimes there are files in the package that aren't mentioned in the manifest.
         # We find these (like loose slides or PDFs) and put them in a 'Recovered Content' module.
         logger.info("Processing orphaned XML/HTML files")
-        referenced_files = set(course.resources.keys())
+        # Build the referenced set from:
+        #   (a) all resource hrefs in the manifest (covers wiki_content + web_resources HTML)
+        #   (b) the {res_id}.xml fallback filenames (weblinks/discussions processed in Step 5)
+        # This prevents the orphaned handler from re-processing files already parsed above.
+        referenced_files = set()
+        for res_id, resource in course.resources.items():
+            if resource.href:
+                referenced_files.add(resource.href)
+            # Always exclude the {res_id}.xml root-level file (weblinks/discussions)
+            referenced_files.add(f"{res_id}.xml")
+        # Also mark every web_resources HTML file as referenced so the orphaned handler
+        # doesn't create duplicate pages for files we already parsed in Step 2.
+        web_resources_dir = self.course_directory / "web_resources"
+        if web_resources_dir.exists():
+            for html_file in web_resources_dir.rglob("*.html"):
+                rel = html_file.relative_to(self.course_directory)
+                referenced_files.add(str(rel).replace("\\", "/"))
         orphaned_pages = self.orphaned_handler.process_all_orphaned_content(referenced_files)
         
         # Merge discovered orphans into the main course pages collection.

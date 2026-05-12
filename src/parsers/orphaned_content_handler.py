@@ -11,7 +11,7 @@ from lxml import etree
 from models.canvas_models import CanvasPage, WorkflowState
 from models.migration_report import MigrationError, ErrorSeverity
 from utils.xml_utils import parse_xml_file, find_element, get_element_text, get_inner_html
-from utils.html_utils import clean_html
+from utils.html_utils import sanitize_html
 from utils.file_utils import is_xml_file, is_html_file
 from config.canvas_schemas import SYSTEM_XML_FILES
 from .pptx_parser import PptxParser
@@ -67,8 +67,10 @@ class OrphanedContentHandler:
             except ValueError:
                 continue
             
+            # Normalise separators so Windows backslashes match forward-slash hrefs.
+            rel_path_norm = rel_path.replace('\\', '/')
             # Check if referenced
-            if rel_path not in referenced_files:
+            if rel_path not in referenced_files and rel_path_norm not in referenced_files:
                 orphaned.append(xml_file)
         
         return orphaned
@@ -196,7 +198,7 @@ class OrphanedContentHandler:
         
         # Combine and clean
         combined = '\n'.join(content_parts)
-        return clean_html(combined)
+        return sanitize_html(combined)
     
     def parse_orphaned_html(self, html_file: Path) -> Optional[CanvasPage]:
         """
@@ -220,7 +222,7 @@ class OrphanedContentHandler:
             page = CanvasPage(
                 title=title,
                 identifier=f"orphaned_{html_file.stem}",
-                body=clean_html(content),
+                body=sanitize_html(content),
                 workflow_state=WorkflowState.ACTIVE,
                 source_file=str(html_file)
             )
@@ -273,7 +275,10 @@ class OrphanedContentHandler:
             except ValueError:
                 continue
             
-            if rel_path not in referenced_files:
+            # Normalise separators so Windows backslashes match the forward-slash
+            # hrefs stored in referenced_files (which come from the manifest).
+            rel_path_norm = rel_path.replace('\\', '/')
+            if rel_path not in referenced_files and rel_path_norm not in referenced_files:
                 page = self.parse_orphaned_html(html_file)
                 if page:
                     pages.append(page)

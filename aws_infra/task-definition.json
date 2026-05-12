@@ -1,0 +1,47 @@
+{
+  "family": "course-onboarding-task-staging",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::129617679313:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::129617679313:role/nextgen-lms-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "course-onboarding",
+      "image": "129617679313.dkr.ecr.us-east-2.amazonaws.com/lms/course-onboarding:latest",
+      "essential": true,
+      "portMappings": [{ "containerPort": 5009, "protocol": "tcp" }],
+      "environment": [
+        { "name": "AWS_REGION",       "value": "us-east-2" },
+        { "name": "PORT",             "value": "5009" },
+        { "name": "LOG_FORMAT",       "value": "json" },
+        { "name": "LOG_LEVEL",        "value": "INFO" },
+        { "name": "MAX_UPLOAD_MB",    "value": "500" },
+        { "name": "S3_ASSETS_BUCKET", "value": "eduvatehub-courseshells-prod" },
+        { "name": "DISABLE_AUTH",     "value": "false" }
+      ],
+      "secrets": [
+        { "name": "MONGODB_URI",     "valueFrom": "arn:aws:secretsmanager:us-east-2:129617679313:secret:nextgen-lms/staging-tTuCW1:MONGODB_URI::" },
+        { "name": "LMS_API_KEY",     "valueFrom": "arn:aws:secretsmanager:us-east-2:129617679313:secret:/lms/staging/course-onboarding/lms-api-key-ONvuJo" },
+        { "name": "S3_CDN_BASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-2:129617679313:secret:/lms/staging/course-onboarding/s3-cdn-base-url-vQETp1" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/course-onboarding-staging",
+          "awslogs-region":        "us-east-2",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group":  "true"
+        }
+      },
+      "healthCheck": {
+        "command":     ["CMD-SHELL", "curl -f http://localhost:5009/api/v1/health || exit 1"],
+        "interval":    30,
+        "timeout":     5,
+        "retries":     3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

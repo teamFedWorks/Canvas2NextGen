@@ -53,6 +53,33 @@ def sanitize_html(
     if not content:
         return ""
     
+    # IMPORTANT:
+    # We normalize whitespace for readability, but we must not destroy
+    # formatting inside <pre> / <code> (where code indentation matters).
+    #
+    # Also, we only HTML-unescape outside those blocks to avoid turning
+    # escaped code literals (&lt;div&gt;) into actual HTML tags.
+    preserve_tokens: List[str] = []
+
+    def _preserve_block(match: re.Match) -> str:
+        preserve_tokens.append(match.group(0))
+        return f"__PRESERVE_BLOCK_{len(preserve_tokens)-1}__"
+
+    # 1) Mask <pre> and <code> blocks before any unescape/normalization.
+    masked = re.sub(r'(?is)<pre\b[^>]*>.*?</pre>', _preserve_block, content)
+    masked = re.sub(r'(?is)<code\b[^>]*>.*?</code>', _preserve_block, masked)
+
+    # 2) Unescape entities outside preserved blocks.
+    masked = html.unescape(masked)
+
+    # 3) Normalize whitespace outside preserved blocks.
+    masked = re.sub(r'\s+', ' ', masked)
+    masked = re.sub(r'\n\s*\n', '\n\n', masked)
+
+    # 4) Restore preserved blocks verbatim.
+    for i, original in enumerate(preserve_tokens):
+        masked = masked.replace(f"__PRESERVE_BLOCK_{i}__", original)
+
     # Default allowed tags (safe for LMS content)
     if allowed_tags is None:
         allowed_tags = [
@@ -82,13 +109,13 @@ def sanitize_html(
     
     # Sanitize using bleach
     sanitized = bleach.clean(
-        content,
+        masked,
         tags=allowed_tags,
         attributes=allowed_attributes,
         strip=True
     )
     
-    return sanitized
+    return sanitized.strip()
 
 
 def extract_text_from_html(html_content: str) -> str:

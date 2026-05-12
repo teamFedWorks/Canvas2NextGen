@@ -1,0 +1,72 @@
+# Git and version control
+.git
+.gitignore
+.github
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+tests/
+
+# Documentation
+*.md
+README.md
+docs/
+
+# Storage directories - CRITICAL: exclude all local storage
+# Everything should come from S3 and be stored in S3
+storage/
+storage/uploads/
+storage/outputs/
+storage/temp_s3/
+
+# AWS infrastructure files - not needed in container
+aws_infra/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Output directories
+tutor_lms_output/
+output/
+**/tutor_lms_output/
+
+# Scripts not needed in production
+scripts/
+tmp/
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml

@@ -15,9 +15,6 @@ API_KEY_HEADER = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 def get_api_key(api_key_header: str = Security(API_KEY_HEADER)):
     """Validates the API key from header."""
-    if os.getenv("DISABLE_AUTH") == "true":
-        return "development"
-
     expected_key = os.getenv("LMS_API_KEY")
     if not expected_key:
         logger.error("LMS_API_KEY environment variable not set")
@@ -26,7 +23,7 @@ def get_api_key(api_key_header: str = Security(API_KEY_HEADER)):
     if api_key_header == expected_key:
         return api_key_header
         
-    logger.warning("Invalid API key attempt", extra={"header": api_key_header})
+    logger.warning("Invalid API key attempt")
     raise HTTPException(
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate API key"
     )

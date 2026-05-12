@@ -11,7 +11,7 @@ from datetime import datetime
 from models.canvas_models import CanvasAssignment, SubmissionType, WorkflowState
 from models.migration_report import MigrationError, ErrorSeverity
 from utils.xml_utils import parse_xml_file, find_element, find_elements, get_element_text
-from utils.html_utils import clean_html
+from utils.html_utils import sanitize_html
 from config.canvas_schemas import CANVAS_NAMESPACES
 
 
@@ -66,12 +66,14 @@ class AssignmentParser:
                 if html_files:
                     try:
                         from utils.html_utils import get_body_content
-                        # Prefer file with same name as directory or assignment if possible, otherwise first html
-                        # Simple strategy: take the first one that isn't some system file
+                        import sys, os
                         target_html = html_files[0]
-                        with open(target_html, 'r', encoding='utf-8') as f:
+                        # On Windows, use extended-length path prefix to bypass MAX_PATH (260 chars)
+                        path_str = str(target_html.resolve())
+                        if sys.platform == 'win32' and len(path_str) > 255 and not path_str.startswith('\\\\?\\'):
+                            path_str = '\\\\?\\' + path_str
+                        with open(path_str, 'r', encoding='utf-8') as f:
                             html_content = f.read()
-                            # Extract body content if it's a full HTML doc
                             description = get_body_content(html_content) or html_content
                     except Exception as e:
                         print(f"Warning: Failed to read HTML description from {html_files[0]}: {e}")
@@ -107,7 +109,7 @@ class AssignmentParser:
         """Extract assignment description"""
         desc_elem = find_element(root, './/canvas:description', CANVAS_NAMESPACES)
         if desc_elem is not None:
-            return clean_html(get_element_text(desc_elem, ""))
+            return sanitize_html(get_element_text(desc_elem, ""))
         return ""
     
     def _extract_submission_types(self, root) -> List[SubmissionType]:

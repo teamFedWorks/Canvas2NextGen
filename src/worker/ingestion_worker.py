@@ -68,7 +68,8 @@ class IngestionWorker:
             university_id = payload.get("university_id", self.default_uni)
             author_id = payload.get("author_id", self.default_author)
             force = payload.get("force", False)
-            
+            institution = payload.get("institution", "SFC")   # e.g. "SFC" or "WBU"
+
             # Use provided program_name or derive it
             program_name = payload.get("program_name") or self._discover_program_name(canvas_course)
             program_id = self.exporter.get_or_create_program(university_id, program_name)
@@ -92,12 +93,13 @@ class IngestionWorker:
 
             # 4. Pipeline Execution
             return self._run_pipeline(
-                canvas_course, 
-                university_id, 
-                program_id, 
-                author_id, 
-                task_id, 
-                on_progress
+                canvas_course,
+                university_id,
+                program_id,
+                author_id,
+                task_id,
+                on_progress,
+                institution=institution,
             )
 
         except Exception as e:
@@ -119,7 +121,8 @@ class IngestionWorker:
         program_id, 
         author_id, 
         task_id, 
-        on_progress
+        on_progress,
+        institution: str = "SFC",
     ) -> Dict[str, Any]:
         """
         Runs the standard transformation and export pipeline.
@@ -127,12 +130,15 @@ class IngestionWorker:
         # 1. Transform
         if on_progress: on_progress("transforming", 40, "Mapping to EduvateHub schema...")
         transformer = CourseTransformer()
+        # For Blackboard exports the real course code lives in the BB course ID
+        # (e.g. MGMT5306SPRING1ST8WKS2026VC01 → MGMT-5306), not the title.
+        code_source = getattr(canvas_course, '_bb_course_id', None) or canvas_course.title
         transformed_course, report = transformer.transform(
             canvas_course,
             university_id,
             author_id,
-            course_code=self._extract_course_code(canvas_course.title),
-            department=self._extract_department(canvas_course.title)
+            course_code=self._extract_course_code(code_source),
+            department=self._extract_department(code_source)
         )
 
         # 2. Asset Migration
@@ -145,7 +151,8 @@ class IngestionWorker:
             source_dir=source_dir, 
             s3_bucket=self.s3_bucket, 
             cdn_url=self.cdn_url,
-            course_id=transformed_course.slug
+            course_id=transformed_course.slug,
+            institution=institution,
         )
         uploader.process_course_assets(transformed_course, canvas_course)
 
@@ -158,7 +165,10 @@ class IngestionWorker:
         # Inject programId if needed for logical grouping (though not in target JSON)
         if program_id:
             course_dict["programId"] = program_id
-            
+
+        # Store institution code so validation reports can group by institution
+        course_dict["institution_code"] = institution
+
         course_id = self.exporter.export(course_dict)
         
         # Track job in DB
@@ -207,17 +217,33 @@ class IngestionWorker:
 
     def _extract_course_code(self, title: str) -> str:
         """
-        Extract a course code from the course title.
+        Extract a course code from the course title or Blackboard course ID.
         Handles patterns like:
-          'IT-1104-01-25/FA'  -> 'IT-1104'
-          'PHI-1114 Logic...' -> 'PHI-1114'
-          'CS 101 Intro...'   -> 'CS-101'
+          'IT-1104-01-25/FA'                    -> 'IT-1104'
+          'PHI-1114 Logic...'                   -> 'PHI-1114'
+          'CS 101 Intro...'                     -> 'CS-101'
+          'Sandbox-IT-2620-Course-...'          -> 'IT-2620'
+          'MGMT5306SPRING1ST8WKS2026VC01'       -> 'MGMT-5306'  (Blackboard course ID)
+          'LEADERSHIP & MANAGEMENT DEVELOPMENT' -> scanned for embedded code
         """
         import re
-        # Match standard course code patterns: LETTERS-DIGITS or LETTERS DIGITS
-        match = re.match(r'^([A-Z]{2,6}[-\s]\d{3,4})', title.strip(), re.IGNORECASE)
+        t = title.strip()
+
+        # Primary: match at start of string  e.g. "IT-1104-01-25/FA"
+        match = re.match(r'^([A-Z]{2,6}[-\s]\d{3,4})', t, re.IGNORECASE)
         if match:
             return match.group(1).replace(' ', '-').upper()
+
+        # Blackboard course ID pattern: DEPT####TERM...  e.g. MGMT5306SPRING...
+        match = re.match(r'^([A-Z]{2,6})(\d{3,4})', t, re.IGNORECASE)
+        if match:
+            return f"{match.group(1).upper()}-{match.group(2)}"
+
+        # Scan anywhere in the title for a standard code pattern
+        match = re.search(r'\b([A-Z]{2,6}[-]\d{3,4})\b', t, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
         return "IMPORTED"
 
     def _extract_department(self, title: str) -> str:
@@ -227,14 +253,22 @@ class IngestionWorker:
         if match:
             prefix = match.group(1).upper()
             dept_map = {
-                "IT": "Information Technology",
-                "CS": "Computer Science",
-                "PHI": "Philosophy",
-                "ENT": "Entrepreneurship",
-                "BUS": "Business",
-                "ENG": "English",
-                "MAT": "Mathematics",
-                "SCI": "Science",
+                "IT":   "Information Technology",
+                "CS":   "Computer Science",
+                "PHI":  "Philosophy",
+                "ENT":  "Entrepreneurship",
+                "BUS":  "Business",
+                "ENG":  "English",
+                "MAT":  "Mathematics",
+                "SCI":  "Science",
+                "MGMT": "Management",
+                "MBA":  "Business Administration",
+                "NURS": "Nursing",
+                "EDUC": "Education",
+                "PSYC": "Psychology",
+                "HIST": "History",
+                "BIOL": "Biology",
+                "CHEM": "Chemistry",
             }
             return dept_map.get(prefix, prefix)
         return "Imported"

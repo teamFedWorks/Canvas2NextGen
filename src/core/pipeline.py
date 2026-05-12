@@ -12,6 +12,7 @@ from typing import Optional
 from models.migration_report import MigrationReport, ReportStatus
 from .stages.validator import Validator
 from .stages.parser import Parser
+from .stages.pre_ingest_audit import PreIngestAuditor
 from transformers.course_transformer import CourseTransformer
 from .stages.asset_uploader import AssetUploader
 from exporters.mongodb_exporter import MongoDBExporter
@@ -64,6 +65,13 @@ class MigrationPipeline:
         logger.info("Starting Migration Pipeline", extra={"source": str(self.course_directory)})
         
         try:
+            # Stage 0: Pre-Ingest Audit (Fix 5)
+            # Fast manifest scan — sets operator expectations before any heavy work.
+            self._notify("auditing", 5, "Running pre-ingest audit...")
+            auditor = PreIngestAuditor(self.course_directory)
+            audit_report = auditor.audit()
+            self.report.pre_ingest_audit = audit_report.to_dict()
+
             # Stage 1: Validation
             self._notify("validating", 10, "Validating Canvas package...")
             validator = Validator(self.course_directory)

@@ -59,6 +59,9 @@ class CanvasResource:
     type: str
     title: Optional[str] = None
     
+    # Nested files within this resource
+    files: List[str] = field(default_factory=list)
+    
     # Validation flag
     file_exists: bool = False
     resolved_path: Optional[str] = None
@@ -294,6 +297,14 @@ class CanvasQuiz:
     show_correct_answers: bool = True
     show_correct_answers_at: Optional[datetime] = None
     hide_correct_answers_at: Optional[datetime] = None
+    
+    # Proctoring / browser lockdown
+    # Parsed directly from <require_lockdown_browser> in assessment_meta.xml.
+    # True means Respondus LockDown Browser is required to take this quiz.
+    # The quiz questions ARE fully exported — only the browser enforcement
+    # setting needs to be configured manually in the target LMS.
+    require_lockdown_browser: bool = False
+    require_lockdown_browser_for_results: bool = False
     
     # Access
     access_code: Optional[str] = None

@@ -40,14 +40,33 @@ class S3Downloader:
             )
         self.client = _get_s3_client()
 
-    def construct_hierarchical_key(self, university: str, program: str, course: str) -> str:
+    def construct_hierarchical_key(
+        self,
+        institution: str,
+        program: str,
+        course: str,
+        programs_segment: str = "programs",
+    ) -> str:
         """
-        Construct the S3 key for a course based on the hierarchy:
-        universities/{uni}/programs/{prog}/courses/{course}/{course}.zip
+        Construct the S3 key for a course using the canonical bucket layout:
 
-        Note: Assumes course shells are named {course_code}.zip within their folder.
+            Institutions/{institution}/{programs_segment}/{program}/courses/{course}.imscc
+
+        Args:
+            institution:      Institution folder name, e.g. 'SFC' or 'WBU'.
+            program:          Program slug, e.g. 'bs-computer-science' or 'phd-program'.
+            course:           Course file stem, e.g. 'it-2440' or 'phd-course-shell'.
+            programs_segment: The middle path segment.  SFC uses 'programs' (lowercase);
+                              WBU uses 'Programs' (capitalised).  Defaults to 'programs'.
+
+        Returns:
+            Full S3 key string, e.g.
+            'Institutions/SFC/programs/bs-computer-science/courses/it-2440.imscc'
         """
-        return f"universities/{university}/programs/{program}/courses/{course}/{course}.zip"
+        return (
+            f"Institutions/{institution}/{programs_segment}/"
+            f"{program}/courses/{course}.imscc"
+        )
 
     def download(self, s3_key: str, destination: Path) -> Path:
         """
@@ -91,22 +110,25 @@ class S3Downloader:
         except Exception:
             return 0
 
-    def list_courses(self, prefix: str = '') -> list:
+    def list_courses(self, prefix: str = '', extensions: tuple = ('.zip',)) -> list:
         """
-        List available course ZIPs in the bucket.
+        List available course packages in the bucket.
 
         Args:
-            prefix: Optional prefix filter (e.g. 'courses/').
+            prefix:     Optional prefix filter (e.g. 'courses/').
+            extensions: File extensions to include.  Defaults to ('.zip',) for
+                        backwards compatibility.  Pass ('.zip', '.imscc') to
+                        also pick up Canvas IMSCC packages.
 
         Returns:
-            List of S3 keys matching the prefix.
+            List of S3 keys matching the prefix and extensions.
         """
         paginator = self.client.get_paginator('list_objects_v2')
         keys = []
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for obj in page.get('Contents', []):
                 key = obj['Key']
-                if key.endswith('.zip'):
+                if any(key.lower().endswith(ext) for ext in extensions):
                     keys.append(key)
         return keys
 

@@ -9,10 +9,12 @@ from datetime import datetime
 from models.canvas_models import CanvasCourse, CanvasModule, CanvasModuleItem, CanvasPage, CanvasQuiz, CanvasAssignment, CanvasDiscussion, CanvasWebLink
 from models.lms_models import (
     LmsCourse, LmsCurriculumModule, LmsCurriculumItem, LmsQuizConfig, 
-    LmsAssignmentConfig, LmsGradeSettings, LmsStatus, LmsItemType
+    LmsAssignmentConfig, LmsGradeSettings, LmsStatus, LmsItemType,
+    LmsQuestion, LmsQuestionAnswer
 )
 from models.migration_report import TransformationReport
 from observability.logger import get_logger
+from config.lms_schemas import CANVAS_QUESTION_TYPE_MAP
 
 logger = get_logger(__name__)
 
@@ -152,11 +154,49 @@ class CourseTransformer:
                     base_item.content = f"<p>Quiz: {quiz.title} — {len(quiz.questions)} question(s)</p>"
                 else:
                     base_item.content = f"<p>Quiz: {quiz.title}</p>"
+
+                # Persist parsed quiz questions (previously discarded).
+                mapped_questions: List[LmsQuestion] = []
+                for cq in (quiz.questions or []):
+                    canvas_qt = getattr(cq, "question_type", None)
+                    canvas_qt_value = canvas_qt.value if canvas_qt else None
+                    lms_qt = CANVAS_QUESTION_TYPE_MAP.get(canvas_qt_value)
+                    if lms_qt is None:
+                        # Not renderable in our LMS.
+                        continue
+
+                    answers: List[LmsQuestionAnswer] = []
+                    for ca in (cq.answers or []):
+                        weight = getattr(ca, "weight", 0.0) or 0.0
+                        answers.append(
+                            LmsQuestionAnswer(
+                                id=getattr(ca, "id", ""),
+                                text=getattr(ca, "text", "") or "",
+                                isCorrect=(float(weight) >= 100.0),
+                                feedback=getattr(ca, "feedback", None),
+                            )
+                        )
+
+                    mapped_questions.append(
+                        LmsQuestion(
+                            identifier=getattr(cq, "identifier", ""),
+                            text=getattr(cq, "question_text", "") or "",
+                            type=lms_qt,
+                            points=float(getattr(cq, "points_possible", 1.0) or 1.0),
+                            answers=answers,
+                            generalFeedback=getattr(cq, "general_feedback", None),
+                            position=getattr(cq, "position", None),
+                        )
+                    )
+
+                base_item.questions = mapped_questions
                 base_item.quizConfig = LmsQuizConfig(
                     gradeSettings=LmsGradeSettings(maxScore=quiz.points_possible or 100.0),
                     timeLimit=quiz.time_limit or 60,
                     attemptsAllowed=quiz.allowed_attempts,
-                    showCorrectAnswers=quiz.show_correct_answers
+                    showCorrectAnswers=quiz.show_correct_answers,
+                    requireLockdownBrowser=quiz.require_lockdown_browser,
+                    requireLockdownBrowserForResults=quiz.require_lockdown_browser_for_results,
                 )
                 return base_item
             # Quiz declared in manifest but not parsed — keep as placeholder

@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 
 from core.stages.package_validator import PackageValidator
 from utils.format_detector import FormatDetector, ExportFormat
+from utils.zip_utils import safe_extractall
 from parsers.imscc_parser import IMSCCParser
 from parsers.canvas_export_parser import CanvasExportParser
 from models.canvas_models import CanvasCourse
@@ -45,7 +46,7 @@ class ZipAdapter:
             cleanup_required = True
             extract_dir = Path(tempfile.mkdtemp(prefix="lms_zip_extract_"))
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                safe_extractall(zip_ref, extract_dir)
                 
             # Traverse into a single top-level directory if present
             root_items = list(extract_dir.iterdir())
@@ -54,23 +55,30 @@ class ZipAdapter:
                 logger.info(f"Traversing into nested top-level directory: {extract_dir.name}")
 
         try:
-            # 4. Detect format just for validation
+            # 4. Detect format
             fmt = FormatDetector.detect(extract_dir)
             if fmt == ExportFormat.UNKNOWN:
                 raise ValueError(f"Unknown export format in {zip_path.name}.")
 
-            # Use the unified core Parser stage to build the CanvasCourse model
+            # Route Blackboard packages to the dedicated adapter
+            if fmt == ExportFormat.BLACKBOARD:
+                logger.info(f"[ZipAdapter] Detected Blackboard export — routing to BlackboardAdapter")
+                from adapters.blackboard_adapter import BlackboardAdapter
+                bb_adapter = BlackboardAdapter()
+                canvas_course = bb_adapter._parse(extract_dir, payload)
+                canvas_course.source_directory = str(extract_dir)
+                return canvas_course
+
+            # Use the unified core Parser stage for Canvas IMS-CC / Canvas Export
             from core.stages.parser import Parser
             parser = Parser(extract_dir)
             canvas_course, parse_report = parser.parse()
-            
+
             if not canvas_course:
-                # If the manifest is missing or completely broken
                 raise ValueError(f"Failed to parse extract dir {extract_dir}: {parse_report.errors}")
-                
+
             # Record the source directory for asset uploader
             canvas_course.source_directory = str(extract_dir)
-                
             return canvas_course
 
         except Exception as e:

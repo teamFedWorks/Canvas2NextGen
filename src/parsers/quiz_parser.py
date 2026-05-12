@@ -11,7 +11,7 @@ from datetime import datetime
 from models.canvas_models import CanvasQuiz, WorkflowState
 from models.migration_report import MigrationError, ErrorSeverity
 from utils.xml_utils import parse_xml_file, find_element, find_elements, get_element_text, get_element_attribute
-from utils.html_utils import clean_html
+from utils.html_utils import sanitize_html
 from .question_parser import QuestionParser
 
 
@@ -67,7 +67,24 @@ class QuizParser:
             points_possible = float(get_element_text(find_element(root, './/points_possible', {}), "0"))
             time_limit = self._extract_time_limit(root)
             allowed_attempts = int(get_element_text(find_element(root, './/allowed_attempts', {}), "1"))
-            
+
+            # Detect Respondus LockDown Browser requirement.
+            # This is stored as <require_lockdown_browser>true</require_lockdown_browser>
+            # in assessment_meta.xml.  The quiz questions ARE fully exported in the QTI
+            # file — only the browser enforcement setting needs manual configuration.
+            def _bool_field(tag: str) -> bool:
+                elem = find_element(root, f'.//{tag}', {})
+                if elem is None:
+                    # Wildcard namespace search
+                    for el in root.iter():
+                        if el.tag.split('}')[-1] == tag:
+                            return (el.text or '').strip().lower() == 'true'
+                    return False
+                return (get_element_text(elem, 'false')).strip().lower() == 'true'
+
+            require_lockdown_browser = _bool_field('require_lockdown_browser')
+            require_lockdown_browser_for_results = _bool_field('require_lockdown_browser_for_results')
+
             # Parse questions
             questions = self.question_parser.parse_questions_from_quiz(quiz_dir)
             
@@ -81,7 +98,9 @@ class QuizParser:
                 allowed_attempts=allowed_attempts,
                 questions=questions,
                 workflow_state=WorkflowState.ACTIVE,
-                source_file=str(assessment_file)
+                source_file=str(assessment_file),
+                require_lockdown_browser=require_lockdown_browser,
+                require_lockdown_browser_for_results=require_lockdown_browser_for_results,
             )
             
             return quiz
@@ -114,17 +133,16 @@ class QuizParser:
 
     def _extract_description(self, root) -> str:
         """Extract quiz description — handles namespaced XML."""
-        from utils.html_utils import clean_html
         import html
         for tag_name in ('description', 'rubric'):
             desc_elem = find_element(root, f'.//{tag_name}', {})
             if desc_elem is not None:
                 text = get_element_text(desc_elem, "")
-                return clean_html(html.unescape(text)) if text else ""
+                return sanitize_html(html.unescape(text)) if text else ""
             # Wildcard namespace
             for el in root.iter():
                 if el.tag.split('}')[-1] == tag_name and el.text:
-                    return clean_html(html.unescape(el.text))
+                    return sanitize_html(html.unescape(el.text))
         return ""
     
     def _extract_time_limit(self, root) -> Optional[int]:
