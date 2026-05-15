@@ -240,3 +240,30 @@ class LmsCourse:
 
     # Source traceability (kept for idempotency, will be filtered if needed)
     canvas_course_id: Optional[str] = None
+
+    def get_content_counts(self) -> Dict[str, int]:
+        """Return counts of all content types for reporting."""
+        modules = len(self.curriculum)
+        lessons = sum(len(m.items) for m in self.curriculum if hasattr(m, 'items'))
+        assessments = len([item for m in self.curriculum for item in (m.items if hasattr(m, 'items') else []) if getattr(item, 'type', None) == 'quiz'])
+        questions = 0
+        for m in self.curriculum:
+            if hasattr(m, 'items'):
+                for item in m.items:
+                    if hasattr(item, 'type') and item.type == 'quiz' and hasattr(item, 'questions'):
+                        questions += len(item.questions)
+        assets = 0
+        for m in self.curriculum:
+            if hasattr(m, 'items'):
+                for item in m.items:
+                    if hasattr(item, 'assets'):
+                        assets += len(item.assets)
+                    elif hasattr(item, 'asset_refs'):
+                        assets += len(item.asset_refs)
+        return {
+            "modules": modules,
+            "lessons": lessons,
+            "assessments": assessments,
+            "questions": questions,
+            "assets": assets,
+        }

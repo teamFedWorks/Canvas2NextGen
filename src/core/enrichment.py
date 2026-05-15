@@ -17,7 +17,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 import html
 
-from models.canonical_models import CanonicalCourse, CanonicalModule, CanonicalCurriculumItem, CanonicalAsset
+from models.canonical_models import CanonicalCourse, CanonicalModule, CanonicalCurriculumItem, CanonicalAsset, CanonicalContentType
 from observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -250,6 +250,42 @@ class ContentEnricher:
                     if keywords:
                         item._enriched_keywords = keywords
                 
+                # 4. Semantic tagging / Type refinement
+                if item.content_type in [CanonicalContentType.LESSON, CanonicalContentType.WEBLINK, CanonicalContentType.FILE, CanonicalContentType.DISCUSSION]:
+                    title_lower = (item.title or "").lower()
+                    
+                    # Policy
+                    if any(kw in title_lower for kw in ["syllabus", "policy", "rules", "guideline", "honor code", "compliance"]):
+                        item.content_type = CanonicalContentType.POLICY
+                    
+                    # Announcement (often stored as discussions in Canvas)
+                    elif any(kw in title_lower for kw in ["announcement", "welcome", "important notice", "update", "week ", "reminder", "posted"]):
+                        item.content_type = CanonicalContentType.ANNOUNCEMENT
+
+                    # Resource (supporting materials) - HIGH PRIORITY for practical materials
+                    elif any(kw in title_lower for kw in ["resource", "support", "help", "tutorial", "uploading", "guide", "faq", "template", "practice", "solution", "materials", "handout", "extra credit", "prep", "sample", "example", "dataset", "csv", "ipynb", "exercise", "lab", "answer"]):
+                        item.content_type = CanonicalContentType.RESOURCE
+                    
+                    # Reading (instructional documents)
+                    elif any(kw in title_lower for kw in ["textbook", "reading", "chapter", "article", "paper", "book", "manual"]) or (title_lower.endswith(".pdf") and not any(kw in title_lower for kw in ["practice", "solution", "exam", "quiz", "assignment"])):
+                        item.content_type = CanonicalContentType.READING
+                    
+                    # Live Session / Media
+                    elif any(kw in title_lower for kw in ["zoom", "webinar", "live session", "video", "recording", "meeting", "presentation", "lecture"]) or title_lower.endswith((".mp4", ".mov", ".avi", ".pptx", ".ppt", ".key")):
+                        item.content_type = CanonicalContentType.LIVE_SESSION
+                    
+                    # Survey
+                    elif any(kw in title_lower for kw in ["survey", "evaluation", "feedback", "poll"]):
+                        item.content_type = CanonicalContentType.SURVEY
+                    
+                    # External Tool
+                    elif any(kw in title_lower for kw in ["lti", "turnitin", "external tool", "launch", "tool", "plugin"]):
+                        item.content_type = CanonicalContentType.EXTERNAL_TOOL
+                    
+                    # Default to RESOURCE for WebLinks if not matched
+                    elif item.content_type == CanonicalContentType.WEBLINK:
+                        item.content_type = CanonicalContentType.RESOURCE
+
                 result.item_count += 1
         
         logger.info("Content enrichment complete",

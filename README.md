@@ -69,8 +69,7 @@ cp .env.example .env
 
 ```
 .
-├── cli.py                             # Unified CLI entry point
-├── server.py                          # FastAPI server entry point
+├── main.py                             # Unified CLI entry point (serve | ingest | worker | report)
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml
 │
@@ -115,16 +114,16 @@ cp .env.example .env
 
 ## CLI — Course Ingestion
 
-All ingestion commands go through `cli.py`. A validation report is **automatically generated** after every successful ingestion and saved to `storage/outputs/`.
+All ingestion commands go through `main.py`. A validation report is **automatically generated** after every successful ingestion and saved to `storage/outputs/`.
 
 ### Ingest a local directory or ZIP
 
 ```bash
-python cli.py ingest-zip --path "storage/uploads/BS IT/IT-1104 Programming I"
+python main.py ingest zip --path "storage/uploads/BS Information Technology/IT-1104 Programming I"
 ```
 
 ```bash
-python cli.py ingest-zip --path path/to/course.zip --uni <UNIVERSITY_ID> --author <AUTHOR_ID>
+python main.py ingest zip --path path/to/course.zip --uni <UNIVERSITY_ID> --author <AUTHOR_ID>
 ```
 
 | Flag | Required | Description |
@@ -137,13 +136,14 @@ python cli.py ingest-zip --path path/to/course.zip --uni <UNIVERSITY_ID> --autho
 ### Batch ingest from S3
 
 ```bash
-python cli.py ingest-s3 --workers 4
+python main.py ingest s3 --institution SFC --workers 4
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--workers` | No | Parallel workers (default: `4`) |
-| `--prefix` | No | S3 key prefix filter (e.g. `spring-2026/`) |
+| `--institution` | Yes | Institution folder name in S3 (e.g. SFC, WBU) |
+| `--program` | No | Limit to one program slug |
+| `--course` | No | Limit to one course code prefix |
 | `--uni` | No | University ObjectId |
 | `--author` | No | Author ObjectId |
 | `--force` | No | Force re-import |
@@ -151,7 +151,7 @@ python cli.py ingest-s3 --workers 4
 ### Ingest from Canvas API
 
 ```bash
-python cli.py ingest-canvas --course-id <CANVAS_COURSE_ID> --uni <UNIVERSITY_ID> --author <AUTHOR_ID>
+python main.py ingest canvas --course-id <CANVAS_COURSE_ID> --uni <UNIVERSITY_ID> --author <AUTHOR_ID>
 ```
 
 ---
@@ -243,9 +243,9 @@ The report covers asset-level status (pass / fail / retry), module structure fro
 ## Running the API Server
 
 ```bash
-python cli.py server
+python main.py serve
 # or
-python server.py
+python main.py serve --port 5009
 ```
 
 - Port: `5009` (configurable via `PORT`)

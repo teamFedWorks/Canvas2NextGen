@@ -175,7 +175,7 @@ def trigger_ingestion(s3_key: str, bucket: str, institution: str) -> str:
         return (
             "⚠️  Ingestion API not configured (ONBOARDING_API_URL / ONBOARDING_API_KEY missing).\n"
             "   Manual ingestion required:\n"
-            f"   python cli.py ingest-s3 --institution {institution} --force"
+            f"   python main.py ingest s3 --institution {institution} --force"
         )
 
     ids = INSTITUTION_IDS.get(institution.upper(), {})
@@ -228,7 +228,7 @@ def trigger_ingestion(s3_key: str, bucket: str, institution: str) -> str:
             f"❌ Could not reach ingestion API: {e}\n"
             "   The ECS service may be stopped (it is adhoc).\n"
             f"   Start it with: .\\aws_infra\\start-service.ps1\n"
-            f"   Then run: python cli.py ingest-s3 --institution {institution} --force"
+            f"   Then run: python main.py ingest s3 --institution {institution} --force"
         )
 
 

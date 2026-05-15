@@ -135,7 +135,24 @@ class CourseTransformer:
 
         if c_item.content_type == 'page':
             page = pages_map.get(lookup_key)
-            base_item.type = "Lesson"
+            
+            # Semantic tagging based on title
+            title_lower = (c_item.title or "").lower()
+            if any(kw in title_lower for kw in ["syllabus", "policy", "rules", "guideline", "honor code"]):
+                base_item.type = "Policy"
+            elif any(kw in title_lower for kw in ["resource", "support", "help", "tutorial", "uploading", "guide"]):
+                base_item.type = "Resource"
+            elif any(kw in title_lower for kw in ["textbook", "reading", "chapter"]):
+                base_item.type = "Reading"
+            elif any(kw in title_lower for kw in ["zoom", "webinar", "live session"]):
+                base_item.type = "LiveSession"
+            elif any(kw in title_lower for kw in ["announcement", "welcome note"]):
+                base_item.type = "Announcement"
+            elif any(kw in title_lower for kw in ["survey", "evaluation", "feedback"]):
+                base_item.type = "Survey"
+            else:
+                base_item.type = "Lesson"
+
             if page:
                 base_item.content = page.body
             # Always return — even without body, the item exists in the module

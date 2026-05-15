@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>Golden Test Results</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f9fafb; }
+h1, h2, h3 { color: #111827; margin-top: 0; }
+.header-card { background-color: white; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-top: 4px solid #10b981; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px; }
+.stat-box { background-color: #f3f4f6; padding: 16px; border-radius: 6px; text-align: center; }
+.stat-value { font-size: 24px; font-weight: bold; color: #1f2937; }
+.stat-label { font-size: 14px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+.course-card { background-color: white; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+th { background-color: #f9fafb; font-weight: 600; color: #374151; }
+.status-exact { color: #10b981; font-weight: 500; }
+.status-close { color: #3b82f6; font-weight: 500; }
+.status-minor { color: #f59e0b; font-weight: 500; }
+.status-major { color: #ef4444; font-weight: 500; }
+.status-unexpected { color: #6b7280; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class='header-card'>
+<h1>Golden Test Suite Results</h1>
+<p>Status: <strong style='color: #10b981; text-transform: uppercase;'>ready</strong></p>
+<div class='summary-grid'>
+<div class='stat-box'><div class='stat-value'>4/4</div><div class='stat-label'>Passed Tests</div></div>
+<div class='stat-box'><div class='stat-value'>100.0%</div><div class='stat-label'>Average Score</div></div>
+</div>
+</div>
+<div class='course-card' style='border-left: 4px solid #10b981;'>
+<h2>IT-1104</h2>
+<p><strong>Path:</strong> <code>storage/uploads/BS Information Technology/IT-1104 Programming I</code></p>
+<p><strong>Match Score:</strong> <span style='color: #10b981; font-weight: bold;'>100.0%</span></p>
+<h3>Core Structure</h3>
+<table>
+<thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Modules</td><td>15</td><td>15</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assessments</td><td>11</td><td>11</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Questions</td><td>11</td><td>11</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assets</td><td>133</td><td>133</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+<h3>Semantic Classification</h3>
+<table>
+<thead><tr><th>Type</th><th>Purpose</th><th>Example</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><span style='background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Lessons</span></td><td style='color: #4b5563; font-size: 14px;'>Instructional learning activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Lecture video, lecture page</td><td>0</td><td>0</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef08a; color: #854d0e; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Assignments</span></td><td style='color: #4b5563; font-size: 14px;'>Submission-required work</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Essay, upload assignment</td><td>5</td><td>5</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #ffedd5; color: #c2410c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Discussions</span></td><td style='color: #4b5563; font-size: 14px;'>Forum/discussion activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Weekly discussion</td><td>0</td><td>0</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fce7f3; color: #be185d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Policies</span></td><td style='color: #4b5563; font-size: 14px;'>Rules/compliance/course governance</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Syllabus, grading policy</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #dcfce7; color: #15803d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Resources</span></td><td style='color: #4b5563; font-size: 14px;'>Non-graded supporting material</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Help docs, support links</td><td>16</td><td>16</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fae8ff; color: #a21caf; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Readings</span></td><td style='color: #4b5563; font-size: 14px;'>Required reading/reference</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>PDF chapter, textbook</td><td>9</td><td>9</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fee2e2; color: #b91c1c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Live Sessions</span></td><td style='color: #4b5563; font-size: 14px;'>Synchronous class</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Webinar/Zoom session</td><td>9</td><td>9</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef9c3; color: #a16207; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Surveys</span></td><td style='color: #4b5563; font-size: 14px;'>Feedback/evaluation</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Course evaluation</td><td>0</td><td>0</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #e0e7ff; color: #4338ca; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Announcements</span></td><td style='color: #4b5563; font-size: 14px;'>Time-sensitive instructor post</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Welcome note</td><td>1</td><td>1</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #f3f4f6; color: #374151; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>External Tools</span></td><td style='color: #4b5563; font-size: 14px;'>LTI/3rd party launch</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Zoom, Turnitin</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+</div>
+<div class='course-card' style='border-left: 4px solid #10b981;'>
+<h2>IT-2105</h2>
+<p><strong>Path:</strong> <code>storage/uploads/BS Information Technology/IT-2105 Programming II</code></p>
+<p><strong>Match Score:</strong> <span style='color: #10b981; font-weight: bold;'>100.0%</span></p>
+<h3>Core Structure</h3>
+<table>
+<thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Modules</td><td>17</td><td>17</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assessments</td><td>3</td><td>3</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Questions</td><td>3</td><td>3</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assets</td><td>207</td><td>207</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+<h3>Semantic Classification</h3>
+<table>
+<thead><tr><th>Type</th><th>Purpose</th><th>Example</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><span style='background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Lessons</span></td><td style='color: #4b5563; font-size: 14px;'>Instructional learning activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Lecture video, lecture page</td><td>13</td><td>13</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef08a; color: #854d0e; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Assignments</span></td><td style='color: #4b5563; font-size: 14px;'>Submission-required work</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Essay, upload assignment</td><td>10</td><td>10</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #ffedd5; color: #c2410c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Discussions</span></td><td style='color: #4b5563; font-size: 14px;'>Forum/discussion activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Weekly discussion</td><td>0</td><td>0</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fce7f3; color: #be185d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Policies</span></td><td style='color: #4b5563; font-size: 14px;'>Rules/compliance/course governance</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Syllabus, grading policy</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #dcfce7; color: #15803d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Resources</span></td><td style='color: #4b5563; font-size: 14px;'>Non-graded supporting material</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Help docs, support links</td><td>55</td><td>55</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fae8ff; color: #a21caf; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Readings</span></td><td style='color: #4b5563; font-size: 14px;'>Required reading/reference</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>PDF chapter, textbook</td><td>14</td><td>14</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fee2e2; color: #b91c1c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Live Sessions</span></td><td style='color: #4b5563; font-size: 14px;'>Synchronous class</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Webinar/Zoom session</td><td>3</td><td>3</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef9c3; color: #a16207; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Surveys</span></td><td style='color: #4b5563; font-size: 14px;'>Feedback/evaluation</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Course evaluation</td><td>1</td><td>1</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #e0e7ff; color: #4338ca; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Announcements</span></td><td style='color: #4b5563; font-size: 14px;'>Time-sensitive instructor post</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Welcome note</td><td>19</td><td>19</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #f3f4f6; color: #374151; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>External Tools</span></td><td style='color: #4b5563; font-size: 14px;'>LTI/3rd party launch</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Zoom, Turnitin</td><td>58</td><td>58</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+</div>
+<div class='course-card' style='border-left: 4px solid #10b981;'>
+<h2>IT-2510</h2>
+<p><strong>Path:</strong> <code>storage/uploads/BS Information Technology/IT-2510 Database Management Systems</code></p>
+<p><strong>Match Score:</strong> <span style='color: #10b981; font-weight: bold;'>100.0%</span></p>
+<h3>Core Structure</h3>
+<table>
+<thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Modules</td><td>17</td><td>17</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assessments</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Questions</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assets</td><td>140</td><td>140</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+<h3>Semantic Classification</h3>
+<table>
+<thead><tr><th>Type</th><th>Purpose</th><th>Example</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><span style='background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Lessons</span></td><td style='color: #4b5563; font-size: 14px;'>Instructional learning activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Lecture video, lecture page</td><td>15</td><td>15</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef08a; color: #854d0e; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Assignments</span></td><td style='color: #4b5563; font-size: 14px;'>Submission-required work</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Essay, upload assignment</td><td>10</td><td>10</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #ffedd5; color: #c2410c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Discussions</span></td><td style='color: #4b5563; font-size: 14px;'>Forum/discussion activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Weekly discussion</td><td>0</td><td>0</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fce7f3; color: #be185d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Policies</span></td><td style='color: #4b5563; font-size: 14px;'>Rules/compliance/course governance</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Syllabus, grading policy</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #dcfce7; color: #15803d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Resources</span></td><td style='color: #4b5563; font-size: 14px;'>Non-graded supporting material</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Help docs, support links</td><td>35</td><td>35</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fae8ff; color: #a21caf; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Readings</span></td><td style='color: #4b5563; font-size: 14px;'>Required reading/reference</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>PDF chapter, textbook</td><td>13</td><td>13</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fee2e2; color: #b91c1c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Live Sessions</span></td><td style='color: #4b5563; font-size: 14px;'>Synchronous class</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Webinar/Zoom session</td><td>3</td><td>3</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef9c3; color: #a16207; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Surveys</span></td><td style='color: #4b5563; font-size: 14px;'>Feedback/evaluation</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Course evaluation</td><td>1</td><td>1</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #e0e7ff; color: #4338ca; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Announcements</span></td><td style='color: #4b5563; font-size: 14px;'>Time-sensitive instructor post</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Welcome note</td><td>14</td><td>14</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #f3f4f6; color: #374151; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>External Tools</span></td><td style='color: #4b5563; font-size: 14px;'>LTI/3rd party launch</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Zoom, Turnitin</td><td>58</td><td>58</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+</div>
+<div class='course-card' style='border-left: 4px solid #10b981;'>
+<h2>IT-3301</h2>
+<p><strong>Path:</strong> <code>storage/uploads/BS Information Technology/IT-3301 Project Management</code></p>
+<p><strong>Match Score:</strong> <span style='color: #10b981; font-weight: bold;'>100.0%</span></p>
+<h3>Core Structure</h3>
+<table>
+<thead><tr><th>Metric</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Modules</td><td>21</td><td>21</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assessments</td><td>19</td><td>19</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Questions</td><td>19</td><td>19</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td>Assets</td><td>163</td><td>163</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+<h3>Semantic Classification</h3>
+<table>
+<thead><tr><th>Type</th><th>Purpose</th><th>Example</th><th>Expected</th><th>Actual</th><th>Diff %</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><span style='background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Lessons</span></td><td style='color: #4b5563; font-size: 14px;'>Instructional learning activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Lecture video, lecture page</td><td>59</td><td>59</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef08a; color: #854d0e; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Assignments</span></td><td style='color: #4b5563; font-size: 14px;'>Submission-required work</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Essay, upload assignment</td><td>5</td><td>5</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #ffedd5; color: #c2410c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Discussions</span></td><td style='color: #4b5563; font-size: 14px;'>Forum/discussion activity</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Weekly discussion</td><td>3</td><td>3</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fce7f3; color: #be185d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Policies</span></td><td style='color: #4b5563; font-size: 14px;'>Rules/compliance/course governance</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Syllabus, grading policy</td><td>1</td><td>1</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #dcfce7; color: #15803d; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Resources</span></td><td style='color: #4b5563; font-size: 14px;'>Non-graded supporting material</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Help docs, support links</td><td>33</td><td>33</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fae8ff; color: #a21caf; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Readings</span></td><td style='color: #4b5563; font-size: 14px;'>Required reading/reference</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>PDF chapter, textbook</td><td>16</td><td>16</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fee2e2; color: #b91c1c; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Live Sessions</span></td><td style='color: #4b5563; font-size: 14px;'>Synchronous class</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Webinar/Zoom session</td><td>24</td><td>24</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #fef9c3; color: #a16207; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Surveys</span></td><td style='color: #4b5563; font-size: 14px;'>Feedback/evaluation</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Course evaluation</td><td>1</td><td>1</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #e0e7ff; color: #4338ca; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>Announcements</span></td><td style='color: #4b5563; font-size: 14px;'>Time-sensitive instructor post</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Welcome note</td><td>2</td><td>2</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+<tr><td><span style='background: #f3f4f6; color: #374151; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;'>External Tools</span></td><td style='color: #4b5563; font-size: 14px;'>LTI/3rd party launch</td><td style='color: #6b7280; font-size: 14px; font-style: italic;'>Zoom, Turnitin</td><td>0</td><td>0</td><td>0.0%</td><td class='status-exact'>EXACT</td></tr>
+</tbody>
+</table>
+</div>
+</body>
+</html>

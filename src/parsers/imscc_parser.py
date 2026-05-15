@@ -131,6 +131,10 @@ class IMSCCParser:
             internal_type = "Assignment"
         elif "discussion" in res_type:
             internal_type = "Discussion"
+        elif "lti" in res_type:
+            internal_type = "ExternalTool"
+        elif "link" in res_type or "url" in res_type:
+            internal_type = "WebLink"
         elif "webcontent" in res_type:
             internal_type = "Lesson"
         

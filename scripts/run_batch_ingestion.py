@@ -58,17 +58,29 @@ def discover_courses(uploads_root: Path) -> list[tuple[str, Path]]:
                     for n in nested:
                         courses.append((program_name, n))
                 else:
-                    print(f"  [SKIP] No imsmanifest.xml in {entry.relative_to(uploads_root)} — skipping")
-                continue
+                    # Handle encoding issues when printing
+                    try:
+                        print(f"  [SKIP] No imsmanifest.xml in {entry.relative_to(uploads_root)} — skipping")
+                    except UnicodeEncodeError:
+                        print(f"  [SKIP] No imsmanifest.xml in [encoding issue] — skipping")
+                    continue
             courses.append((program_name, entry))
     return courses
 
+
+def safe_print(text):
+    """Safely print text handling encoding issues"""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Replace problematic characters
+        print(text.encode('ascii', 'replace').decode('ascii'))
 
 def bar(label: str, width: int = 60) -> str:
     return f"\n{'─' * width}\n  {label}\n{'─' * width}"
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# ── main ────────────────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser(description="Batch course ingestion runner")
@@ -80,26 +92,47 @@ def main():
 
     uploads_root = Path(args.uploads)
     if not uploads_root.exists():
-        print(f"[ERROR] Uploads directory not found: {uploads_root}")
+        safe_print(f"[ERROR] Uploads directory not found: {uploads_root}")
         sys.exit(1)
 
     courses = discover_courses(uploads_root)
     if not courses:
-        print("[ERROR] No valid course folders found.")
+        safe_print("[ERROR] No valid course folders found.")
         sys.exit(1)
 
-    print(f"\n{'='*60}")
-    print(f"  Batch Ingestion — {len(courses)} course(s) found")
-    print(f"  Uploads : {uploads_root}")
-    print(f"  Outputs : {ROOT / 'storage' / 'outputs'}")
-    print(f"  Force   : {args.force}")
-    print(f"{'='*60}")
+    try:
+        safe_print(f"\n{'='*60}")
+        safe_print(f"  Batch Ingestion — {len(courses)} course(s) found")
+        safe_print(f"  Uploads : {uploads_root}")
+        safe_print(f"  Outputs : {ROOT / 'storage' / 'outputs'}")
+        safe_print(f"  Force   : {args.force}")
+        safe_print(f"{'='*60}")
+    except:
+        safe_print(f"\n{'='*60}")
+        safe_print(f"  Batch Ingestion — {len(courses)} course(s) found")
+        safe_print(f"  Uploads : {uploads_root}")
+        safe_print(f"  Outputs : {ROOT / 'storage' / 'outputs'}")
+        safe_print(f"  Force   : {args.force}")
+        safe_print(f"{'='*60}")
 
     if args.dry_run:
-        print("\n[DRY RUN] Courses that would be ingested:\n")
-        for i, (prog, folder) in enumerate(courses, 1):
-            print(f"  {i:>2}. [{prog}]  {folder.name}")
-        print(f"\nTotal: {len(courses)} course(s). Run without --dry-run to ingest.")
+        try:
+            safe_print("\n[DRY RUN] Courses that would be ingested:\n")
+            for i, (prog, folder) in enumerate(courses, 1):
+                try:
+                    safe_print(f"  {i:>2}. [{prog}]  {folder.name}")
+                except UnicodeEncodeError:
+                    safe_print(f"  {i:>2}. [{prog}]  [encoding issue in folder name]")
+            safe_print(f"\nTotal: {len(courses)} course(s). Run without --dry-run to ingest.")
+        except:
+            safe_print("\n[DRY RUN] Courses that would be ingested:\n")
+            for i, (prog, folder) in enumerate(courses, 1):
+                # Handle encoding issues in course names
+                try:
+                    safe_print(f"  {i:>2}. [{prog}]  {folder.name}")
+                except UnicodeEncodeError:
+                    safe_print(f"  {i:>2}. [{prog}]  [encoding issue in folder name]")
+            safe_print(f"\nTotal: {len(courses)} course(s). Run without --dry-run to ingest.")
         return
 
     worker = IngestionWorker(
@@ -111,7 +144,19 @@ def main():
     total = len(courses)
 
     for idx, (program_name, course_folder) in enumerate(courses, 1):
-        print(bar(f"[{idx}/{total}]  {course_folder.name}  ({program_name})"))
+        # Handle encoding issues in course names for display
+        try:
+            display_name = course_folder.name
+        except UnicodeEncodeError:
+            display_name = "[encoding issue in folder name]"
+            
+        try:
+            safe_print(bar(f"[{idx}/{total}]  {display_name}  ({program_name})"))
+        except:
+            try:
+                safe_print(bar(f"[{idx}/{total}]  [encoding issue]  ({program_name})"))
+            except:
+                safe_print(bar(f"[{idx}/{total}]  [issue]  ({program_name})"))
 
         t0 = time.time()
         try:
@@ -138,35 +183,68 @@ def main():
                 tag = f"FAILED   — {result.get('error','unknown error')}"
 
             results.append((course_folder.name, status, deduped, tag))
-            print(f"  {tag}")
+            try:
+                safe_print(f"  {tag}")
+            except UnicodeEncodeError:
+                safe_print(f"  [{tag.encode('ascii', 'replace').decode('ascii')}]")
+            
             if status == "success" and not deduped:
-                print(f"  Course ID : {result.get('course_id')}")
+                try:
+                    safe_print(f"  Course ID : {result.get('course_id')}")
+                except UnicodeEncodeError:
+                    safe_print(f"  Course ID : [encoding issue]")
 
         except Exception as exc:
             elapsed = time.time() - t0
             tag = f"CRASHED  — {exc}"
             results.append((course_folder.name, "crashed", False, tag))
-            print(f"  {tag}")
+            try:
+                safe_print(f"  {tag}")
+            except UnicodeEncodeError:
+                safe_print(f"  [{tag.encode('ascii', 'replace').decode('ascii')}]")
 
     # ── final summary ─────────────────────────────────────────────────────────
-    print(f"\n{'='*60}")
-    print(f"  BATCH COMPLETE — {total} course(s) processed")
-    print(f"{'='*60}")
+    try:
+        safe_print(f"\n{'='*60}")
+        safe_print(f"  BATCH COMPLETE — {total} course(s) processed")
+        safe_print(f"{'='*60}")
+    except:
+        safe_print(f"\n{'='*60}")
+        safe_print(f"  BATCH COMPLETE — {total} course(s) processed")
+        safe_print(f"{'='*60}")
 
     success  = sum(1 for _, s, d, _ in results if s == "success" and not d)
     skipped  = sum(1 for _, s, d, _ in results if s == "success" and d)
     failed   = sum(1 for _, s, _, _ in results if s not in ("success",))
 
-    print(f"  Ingested : {success}")
-    print(f"  Skipped  : {skipped}  (already existed — use --force to re-ingest)")
-    print(f"  Failed   : {failed}")
-    print(f"\n  Validation reports → storage/outputs/\n")
+    try:
+        safe_print(f"  Ingested : {success}")
+        safe_print(f"  Skipped  : {skipped}  (already existed — use --force to re-ingest)")
+        safe_print(f"  Failed   : {failed}")
+        safe_print(f"\n  Validation reports → storage/outputs/\n")
+    except:
+        safe_print(f"  Ingested : {success}")
+        safe_print(f"  Skipped  : {skipped}  (already existed — use --force to re-ingest)")
+        safe_print(f"  Failed   : {failed}")
+        safe_print(f"\n  Validation reports → storage/outputs/\n")
 
     if failed:
-        print("  Failed courses:")
-        for name, status, _, tag in results:
-            if status not in ("success",):
-                print(f"    • {name}  →  {tag}")
+        try:
+            safe_print("  Failed courses:")
+            for name, status, _, tag in results:
+                if status not in ("success",):
+                    try:
+                        safe_print(f"    • {name}  →  {tag}")
+                    except UnicodeEncodeError:
+                        safe_print(f"    • [encoding issue]  →  [{tag.encode('ascii', 'replace').decode('ascii')}]")
+        except:
+            safe_print("  Failed courses:")
+            for name, status, _, tag in results:
+                if status not in ("success",):
+                    try:
+                        safe_print(f"    • {name}  →  {tag}")
+                    except UnicodeEncodeError:
+                        safe_print(f"    • [encoding issue]  →  [{tag.encode('ascii', 'replace').decode('ascii')}]")
         sys.exit(1)
 
 

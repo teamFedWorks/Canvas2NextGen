@@ -1,0 +1,100 @@
+{
+  "courses": [
+    {
+      "id": "IT-1104",
+      "path": "storage/uploads/BS Information Technology/IT-1104 Programming I",
+      "platform": "canvas",
+      "expected": {
+        "modules": 15,
+        "assessments": 11,
+        "questions": 11,
+        "assets": 133,
+        "asset_coverage": 98.0,
+        "semantic_classification": {
+          "Lesson": 0,
+          "Assignment": 5,
+          "Discussion": 0,
+          "Policy": 2,
+          "Resource": 16,
+          "Reading": 9,
+          "LiveSession": 9,
+          "Survey": 0,
+          "Announcement": 1,
+          "ExternalTool": 2
+        }
+      }
+    },
+    {
+      "id": "IT-2105",
+      "path": "storage/uploads/BS Information Technology/IT-2105 Programming II",
+      "platform": "canvas",
+      "expected": {
+        "modules": 17,
+        "assessments": 3,
+        "questions": 3,
+        "assets": 207,
+        "asset_coverage": 97.0,
+        "semantic_classification": {
+          "Lesson": 13,
+          "Assignment": 10,
+          "Discussion": 0,
+          "Policy": 2,
+          "Resource": 55,
+          "Reading": 14,
+          "LiveSession": 3,
+          "Survey": 1,
+          "Announcement": 19,
+          "ExternalTool": 58
+        }
+      }
+    },
+    {
+      "id": "IT-2510",
+      "path": "storage/uploads/BS Information Technology/IT-2510 Database Management Systems",
+      "platform": "canvas",
+      "expected": {
+        "modules": 17,
+        "assessments": 2,
+        "questions": 2,
+        "assets": 140,
+        "asset_coverage": 98.0,
+        "semantic_classification": {
+          "Lesson": 15,
+          "Assignment": 10,
+          "Discussion": 0,
+          "Policy": 2,
+          "Resource": 35,
+          "Reading": 13,
+          "LiveSession": 3,
+          "Survey": 1,
+          "Announcement": 14,
+          "ExternalTool": 58
+        }
+      }
+    },
+    {
+      "id": "IT-3301",
+      "path": "storage/uploads/BS Information Technology/IT-3301 Project Management",
+      "platform": "canvas",
+      "expected": {
+        "modules": 21,
+        "assessments": 19,
+        "questions": 19,
+        "assets": 163,
+        "asset_coverage": 95.0,
+        "semantic_classification": {
+          "Lesson": 59,
+          "Assignment": 5,
+          "Discussion": 3,
+          "Policy": 1,
+          "Resource": 33,
+          "Reading": 16,
+          "LiveSession": 24,
+          "Survey": 1,
+          "Announcement": 2,
+          "ExternalTool": 0
+        }
+      }
+    }
+  ]
+}

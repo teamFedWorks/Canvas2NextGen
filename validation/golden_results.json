@@ -1,0 +1,526 @@
+{
+  "total_tests": 4,
+  "passed_tests": 4,
+  "average_score": 100.0,
+  "all_passed": true,
+  "details": [
+    {
+      "course_id": "IT-1104",
+      "path": "storage/uploads/BS Information Technology/IT-1104 Programming I",
+      "pipeline_success": true,
+      "expected": {
+        "modules": 15,
+        "assessments": 11,
+        "questions": 11,
+        "assets": 133,
+        "asset_coverage": 98.0,
+        "semantic_classification": {
+          "Lesson": 0,
+          "Assignment": 5,
+          "Discussion": 0,
+          "Policy": 2,
+          "Resource": 16,
+          "Reading": 9,
+          "LiveSession": 9,
+          "Survey": 0,
+          "Announcement": 1,
+          "ExternalTool": 2
+        }
+      },
+      "actual": {
+        "modules": 15,
+        "lessons": 0,
+        "assignments": 5,
+        "discussions": 0,
+        "policies": 2,
+        "resources": 16,
+        "readings": 9,
+        "live_sessions": 9,
+        "surveys": 0,
+        "announcements": 1,
+        "external_tools": 2,
+        "assessments": 11,
+        "questions": 11,
+        "assets": 133
+      },
+      "diffs": {
+        "modules": {
+          "expected": 15,
+          "actual": 15,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "lessons": {
+          "expected": 0,
+          "actual": 0,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assignments": {
+          "expected": 5,
+          "actual": 5,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "discussions": {
+          "expected": 0,
+          "actual": 0,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "policies": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "resources": {
+          "expected": 16,
+          "actual": 16,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "readings": {
+          "expected": 9,
+          "actual": 9,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "live_sessions": {
+          "expected": 9,
+          "actual": 9,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "surveys": {
+          "expected": 0,
+          "actual": 0,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "announcements": {
+          "expected": 1,
+          "actual": 1,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "external_tools": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assessments": {
+          "expected": 11,
+          "actual": 11,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "questions": {
+          "expected": 11,
+          "actual": 11,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assets": {
+          "expected": 133,
+          "actual": 133,
+          "pct_diff": 0.0,
+          "status": "exact"
+        }
+      },
+      "reconciliation": {
+        "score": 100.0
+      }
+    },
+    {
+      "course_id": "IT-2105",
+      "path": "storage/uploads/BS Information Technology/IT-2105 Programming II",
+      "pipeline_success": true,
+      "expected": {
+        "modules": 17,
+        "assessments": 3,
+        "questions": 3,
+        "assets": 207,
+        "asset_coverage": 97.0,
+        "semantic_classification": {
+          "Lesson": 13,
+          "Assignment": 10,
+          "Discussion": 0,
+          "Policy": 2,
+          "Resource": 55,
+          "Reading": 14,
+          "LiveSession": 3,
+          "Survey": 1,
+          "Announcement": 19,
+          "ExternalTool": 58
+        }
+      },
+      "actual": {
+        "modules": 17,
+        "lessons": 13,
+        "assignments": 10,
+        "discussions": 0,
+        "policies": 2,
+        "resources": 55,
+        "readings": 14,
+        "live_sessions": 3,
+        "surveys": 1,
+        "announcements": 19,
+        "external_tools": 58,
+        "assessments": 3,
+        "questions": 3,
+        "assets": 207
+      },
+      "diffs": {
+        "modules": {
+          "expected": 17,
+          "actual": 17,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "lessons": {
+          "expected": 13,
+          "actual": 13,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assignments": {
+          "expected": 10,
+          "actual": 10,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "discussions": {
+          "expected": 0,
+          "actual": 0,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "policies": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "resources": {
+          "expected": 55,
+          "actual": 55,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "readings": {
+          "expected": 14,
+          "actual": 14,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "live_sessions": {
+          "expected": 3,
+          "actual": 3,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "surveys": {
+          "expected": 1,
+          "actual": 1,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "announcements": {
+          "expected": 19,
+          "actual": 19,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "external_tools": {
+          "expected": 58,
+          "actual": 58,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assessments": {
+          "expected": 3,
+          "actual": 3,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "questions": {
+          "expected": 3,
+          "actual": 3,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assets": {
+          "expected": 207,
+          "actual": 207,
+          "pct_diff": 0.0,
+          "status": "exact"
+        }
+      },
+      "reconciliation": {
+        "score": 100.0
+      }
+    },
+    {
+      "course_id": "IT-2510",
+      "path": "storage/uploads/BS Information Technology/IT-2510 Database Management Systems",
+      "pipeline_success": true,
+      "expected": {
+        "modules": 17,
+        "assessments": 2,
+        "questions": 2,
+        "assets": 140,
+        "asset_coverage": 98.0,
+        "semantic_classification": {
+          "Lesson": 15,
+          "Assignment": 10,
+          "Discussion": 0,
+          "Policy": 2,
+          "Resource": 35,
+          "Reading": 13,
+          "LiveSession": 3,
+          "Survey": 1,
+          "Announcement": 14,
+          "ExternalTool": 58
+        }
+      },
+      "actual": {
+        "modules": 17,
+        "lessons": 15,
+        "assignments": 10,
+        "discussions": 0,
+        "policies": 2,
+        "resources": 35,
+        "readings": 13,
+        "live_sessions": 3,
+        "surveys": 1,
+        "announcements": 14,
+        "external_tools": 58,
+        "assessments": 2,
+        "questions": 2,
+        "assets": 140
+      },
+      "diffs": {
+        "modules": {
+          "expected": 17,
+          "actual": 17,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "lessons": {
+          "expected": 15,
+          "actual": 15,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assignments": {
+          "expected": 10,
+          "actual": 10,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "discussions": {
+          "expected": 0,
+          "actual": 0,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "policies": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "resources": {
+          "expected": 35,
+          "actual": 35,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "readings": {
+          "expected": 13,
+          "actual": 13,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "live_sessions": {
+          "expected": 3,
+          "actual": 3,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "surveys": {
+          "expected": 1,
+          "actual": 1,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "announcements": {
+          "expected": 14,
+          "actual": 14,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "external_tools": {
+          "expected": 58,
+          "actual": 58,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assessments": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "questions": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assets": {
+          "expected": 140,
+          "actual": 140,
+          "pct_diff": 0.0,
+          "status": "exact"
+        }
+      },
+      "reconciliation": {
+        "score": 100.0
+      }
+    },
+    {
+      "course_id": "IT-3301",
+      "path": "storage/uploads/BS Information Technology/IT-3301 Project Management",
+      "pipeline_success": true,
+      "expected": {
+        "modules": 21,
+        "assessments": 19,
+        "questions": 19,
+        "assets": 163,
+        "asset_coverage": 95.0,
+        "semantic_classification": {
+          "Lesson": 59,
+          "Assignment": 5,
+          "Discussion": 3,
+          "Policy": 1,
+          "Resource": 33,
+          "Reading": 16,
+          "LiveSession": 24,
+          "Survey": 1,
+          "Announcement": 2,
+          "ExternalTool": 0
+        }
+      },
+      "actual": {
+        "modules": 21,
+        "lessons": 59,
+        "assignments": 5,
+        "discussions": 3,
+        "policies": 1,
+        "resources": 33,
+        "readings": 16,
+        "live_sessions": 24,
+        "surveys": 1,
+        "announcements": 2,
+        "external_tools": 0,
+        "assessments": 19,
+        "questions": 19,
+        "assets": 163
+      },
+      "diffs": {
+        "modules": {
+          "expected": 21,
+          "actual": 21,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "lessons": {
+          "expected": 59,
+          "actual": 59,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assignments": {
+          "expected": 5,
+          "actual": 5,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "discussions": {
+          "expected": 3,
+          "actual": 3,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "policies": {
+          "expected": 1,
+          "actual": 1,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "resources": {
+          "expected": 33,
+          "actual": 33,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "readings": {
+          "expected": 16,
+          "actual": 16,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "live_sessions": {
+          "expected": 24,
+          "actual": 24,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "surveys": {
+          "expected": 1,
+          "actual": 1,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "announcements": {
+          "expected": 2,
+          "actual": 2,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "external_tools": {
+          "expected": 0,
+          "actual": 0,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assessments": {
+          "expected": 19,
+          "actual": 19,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "questions": {
+          "expected": 19,
+          "actual": 19,
+          "pct_diff": 0.0,
+          "status": "exact"
+        },
+        "assets": {
+          "expected": 163,
+          "actual": 163,
+          "pct_diff": 0.0,
+          "status": "exact"
+        }
+      },
+      "reconciliation": {
+        "score": 100.0
+      }
+    }
+  ],
+  "status": "ready",
+  "passed": true
+}

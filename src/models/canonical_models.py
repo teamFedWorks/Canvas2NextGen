@@ -20,6 +20,12 @@ class CanonicalContentType(Enum):
     RESOURCE = "Resource"
     WEBLINK = "WebLink"
     FILE = "File"
+    READING = "Reading"
+    POLICY = "Policy"
+    ANNOUNCEMENT = "Announcement"
+    EXTERNAL_TOOL = "ExternalTool"
+    SURVEY = "Survey"
+    LIVE_SESSION = "LiveSession"
 
 
 class CanonicalQuestionType(Enum):
@@ -92,14 +98,14 @@ class CanonicalAssessment:
     identifier: str
     title: str
     description: str  # HTML content
-    
+
     # Type discriminator
     is_graded: bool = True
     assessment_type: str = "quiz"  # quiz, exam, assignment
-    
+
     # Questions
     questions: List[CanonicalQuestion] = field(default_factory=list)
-    
+
     # Settings
     points_possible: float = 100.0
     time_limit_minutes: Optional[int] = None
@@ -107,11 +113,14 @@ class CanonicalAssessment:
     shuffle_answers: bool = False
     show_correct_answers: bool = True
     require_lockdown_browser: bool = False
-    
+
     # Timing
     due_at: Optional[datetime] = None
     unlock_at: Optional[datetime] = None
     lock_at: Optional[datetime] = None
+
+    # Source tracking
+    source_file: Optional[str] = None
 
 
 @dataclass
@@ -120,19 +129,20 @@ class CanonicalCurriculumItem:
     identifier: str
     title: str
     content_type: CanonicalContentType
-    
+
     # Content
     body: Optional[str] = None  # HTML content for lessons/discussions
-    
+
     # Type-specific references
     assessment_ref: Optional[str] = None  # Points to CanonicalAssessment.identifier
     asset_refs: List[str] = field(default_factory=list)  # Points to CanonicalAsset.identifier
-    
+
     # Position within module
     position: int = 0
-    
+
     # Metadata
     source_identifier: Optional[str] = None  # Original LMS identifier for tracing
+    source_file: Optional[str] = None  # Original source file path
 
 
 @dataclass

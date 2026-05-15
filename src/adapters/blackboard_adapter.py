@@ -151,6 +151,8 @@ class _BBManifest:
         self.resources: Dict[str, Dict] = {}
         self.toc_roots: List = []
         self._root = None
+        self._title_to_resource: Dict[str, Dict] = {}  # title → resource (for lookups)
+        self._resource_redirects: Dict[str, Dict] = {}  # doc_res_id → richer resource (computed after parse)
 
     def parse(self) -> bool:
         import xml.etree.ElementTree as ET
@@ -181,6 +183,41 @@ class _BBManifest:
                     "type": res_type,
                     "title": title,
                 }
+                # Index by title too (for cross-resolution)
+                if title:
+                    existing = self._title_to_resource.get(title)
+                    new_type = res_type
+                    # Prioritize richer resources over generic document wrappers
+                    if existing:
+                        existing_type = existing.get("type", "")
+                        richer_types = ("assessment/x-bb-qti-test", "resource/x-bb-discussionboard", "resource/x-bb-announcement", "resource/x-bb-weblink")
+                        generic_types = ("resource/x-bb-document", "course/x-bb-coursetoc")
+                        if existing_type in richer_types and new_type in generic_types:
+                            pass  # Keep the existing richer resource
+                        else:
+                            self._title_to_resource[title] = self.resources[ident]
+                    else:
+                        self._title_to_resource[title] = self.resources[ident]
+
+        # After all resources loaded, build redirects:
+        # Document wrappers that have a matching assessment/discussion resource
+        # should redirect to the richer type.
+        for rid, res in self.resources.items():
+            res_type = res.get("type", "")
+            title = res.get("title", "")
+            # Document or course toc wrappers that have a matching non-doc resource
+            if res_type in ("resource/x-bb-document", "course/x-bb-coursetoc"):
+                if title and title in self._title_to_resource:
+                    richer = self._title_to_resource[title]
+                    richer_type = richer.get("type", "")
+                    # Redirect if the match is a more specific type (assessment, discussion, announcement)
+                    if richer_type in ("assessment/x-bb-qti-test", "resource/x-bb-discussionboard",
+                                        "resource/x-bb-announcement", "resource/x-bb-weblink"):
+                        # Use the richer resource's type and file
+                        res["type"] = richer_type
+                        res["bb_file"] = richer["bb_file"]
+                        self._resource_redirects[rid] = richer
+                        logger.info(f"[BB] Redirected {rid} ('{title}') → {richer_type} (file: {richer.get('bb_file')})")
 
     def _parse_organizations(self):
         """Collect top-level TOC item elements."""
@@ -492,13 +529,22 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
         else:
             real_children.append(child)
 
-    # Determine content type
-    if bb_type == "assessment":
+    # Determine content type based on Blackboard resource type
+    # Blackboard types are namespaced, e.g.:
+    #   "assessment/x-bb-qti-test" → quiz
+    #   "resource/x-bb-discussionboard" → discussion
+    #   "resource/x-bb-weblink" → weblink
+    #   "resource/x-bb-announcement" → page (announcement body)
+    #   "course/x-bb-coursetoc" → folder → page
+    #   "resource/x-bb-document" → page
+    if "assessment" in bb_type or "qti-test" in bb_type:
         content_type = "quiz"
-    elif bb_type == "discussion":
+    elif "discussion" in bb_type or "forum" in bb_type:
         content_type = "discussion"
-    elif bb_type == "link":
+    elif "link" in bb_type or "weblink" in bb_type:
         content_type = "weblink"
+    elif "assignment" in bb_type:
+        content_type = "assignment"
     else:
         content_type = "page"
 

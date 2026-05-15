@@ -8,7 +8,7 @@ This layer analyzes the manifest to:
 """
 
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional
 from dataclasses import dataclass, field
 import xml.etree.ElementTree as ET
 

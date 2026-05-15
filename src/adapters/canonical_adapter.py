@@ -51,23 +51,20 @@ class BaseCanonicalAdapter(ABC):
 
 class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
     """
-    Converts CanvasCanvas models to Canonical models.
+    Converts Canvas exports to Canonical models.
     
-    This adapter wraps the existing Canvas parsing logic and normalizes output.
+    This adapter wraps the existing ZipAdapter/Parser infrastructure and normalizes output.
     """
     
     def __init__(self, source_path: Path):
         super().__init__(source_path)
-        # Import here to avoid circular imports
-        from adapters.canvas_adapter import CanvasAdapter
-        self._canvas_adapter = CanvasAdapter()
     
     def load(self, payload: dict) -> CanonicalCourse:
         """Load Canvas export and convert to canonical format."""
-        from models.canvas_models import CanvasCourse, CanvasModule as CanvasModuleModel
-        
-        # Use existing Canvas adapter to parse
-        canvas_course = self._canvas_adapter.load(payload)
+        # Use existing ZipAdapter which handles both ZIP files and directories
+        from adapters.zip_adapter import ZipAdapter
+        adapter = ZipAdapter()
+        canvas_course = adapter.load(payload)
         
         # Convert to canonical
         return self._convert_to_canonical(canvas_course)
@@ -91,6 +88,12 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
             for q in bank.questions:
                 question_map[q.identifier] = q
         
+        # Build page lookup for body content hydration
+        page_map = {p.identifier: p for p in canvas_course.pages}
+        
+        # Build discussion lookup
+        discussion_map = {d.identifier: d for d in canvas_course.discussions}
+        
         # Convert modules with proper item references
         modules = []
         for canvas_module in canvas_course.modules:
@@ -98,9 +101,17 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
                 canvas_module, 
                 question_map,
                 assessment_map,
-                canvas_course.resources
+                canvas_course.resources,
+                page_map,
+                discussion_map
             )
             modules.append(canonical_module)
+        
+        # Inject Syllabus if it exists but is not in a module
+        self._inject_syllabus(canvas_course, modules)
+        
+        # Inject LTI External Tools
+        self._inject_lti_tools(canvas_course, modules)
         
         # Convert assets
         assets = self._convert_assets(canvas_course.resources, str(self.source_path))
@@ -178,14 +189,14 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
                 ))
         return questions
     
-    def _convert_module(self, canvas_module, question_map, assessment_map, resources):
+    def _convert_module(self, canvas_module, question_map, assessment_map, resources, page_map, discussion_map):
         """Convert a Canvas module."""
         items = []
         
         for item in canvas_module.items:
             content_type = self._map_content_type(item.content_type)
             
-            # Build item
+            # Build item - start with basic fields
             canonical_item = CanonicalCurriculumItem(
                 identifier=item.identifier or f"item_{id(item)}",
                 title=item.title,
@@ -194,6 +205,15 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
                 source_identifier=item.identifier
             )
             
+            # Hydrate body content from pages and discussions
+            # Use _content_ref (resource identifierref) to look up the page
+            content_ref = getattr(item, '_content_ref', None)
+            if content_type == CanonicalContentType.LESSON:
+                if content_ref and content_ref in page_map:
+                    canonical_item.body = page_map[content_ref].body
+                elif content_ref and content_ref in discussion_map:
+                    canonical_item.body = discussion_map[content_ref].body
+            
             # Link to assessment if applicable
             if content_type == CanonicalContentType.QUIZ:
                 assessment_key = f"quiz_{item.identifier}"
@@ -201,13 +221,93 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
                     canonical_item.assessment_ref = assessment_key
             
             items.append(canonical_item)
-        
+            
         return CanonicalModule(
             identifier=canvas_module.identifier or f"module_{id(canvas_module)}",
             title=canvas_module.title,
             items=items,
             position=canvas_module.position
         )
+
+    def _inject_syllabus(self, canvas_course, modules):
+        """Inject Syllabus into a special module if it exists as a separate file."""
+        syllabus_path = Path(canvas_course.source_directory) / "course_settings" / "syllabus.html"
+        if syllabus_path.exists():
+            # Check if syllabus is already in a module
+            already_in = False
+            for m in modules:
+                for item in m.items:
+                    if "syllabus" in item.title.lower():
+                        already_in = True
+                        break
+            
+            if not already_in:
+                # Create a special module for Syllabus
+                try:
+                    with open(syllabus_path, 'r', encoding='utf-8') as f:
+                        body = f.read()
+                    
+                    item = CanonicalCurriculumItem(
+                        identifier="syllabus_injected",
+                        title="Course Syllabus",
+                        content_type=CanonicalContentType.POLICY,
+                        position=0,
+                        body=body
+                    )
+                    
+                    # Create or find Course Information module
+                    modules.insert(0, CanonicalModule(
+                        identifier="module_course_info",
+                        title="Course Information",
+                        items=[item],
+                        position=-1
+                    ))
+                except Exception:
+                    pass
+
+    def _inject_lti_tools(self, canvas_course, modules):
+        """Find and inject LTI tools from resources if not already in modules."""
+        lti_items = []
+        referenced_ids = set()
+        for m in modules:
+            for item in m.items:
+                if item.source_identifier:
+                    referenced_ids.add(item.source_identifier)
+        
+        for res_id, res in canvas_course.resources.items():
+            if res_id not in referenced_ids and res.type and "lti" in res.type.lower():
+                # This is an orphaned LTI tool
+                title = res_id
+                # Try to find a better title from the XML if possible
+                if res.href:
+                    xml_path = Path(canvas_course.source_directory) / res.href
+                    if xml_path.exists():
+                        try:
+                            from utils.xml_utils import parse_xml_file, find_element, get_element_text
+                            root = parse_xml_file(xml_path)
+                            # Basic LTI uses <blti:title> or <title>
+                            title_elem = root.find(".//{http://www.imsglobal.org/xsd/imsbasiclti_v1p0}title")
+                            if title_elem is not None:
+                                title = title_elem.text
+                        except Exception:
+                            pass
+                
+                item = CanonicalCurriculumItem(
+                    identifier=f"lti_{res_id}",
+                    title=title,
+                    content_type=CanonicalContentType.EXTERNAL_TOOL,
+                    position=len(lti_items),
+                    source_identifier=res_id
+                )
+                lti_items.append(item)
+        
+        if lti_items:
+            modules.append(CanonicalModule(
+                identifier="module_external_tools",
+                title="External Tools & Integrations",
+                items=lti_items,
+                position=1000
+            ))
     
     def _convert_assets(self, resources, source_dir):
         """Convert manifest resources to canonical assets."""
@@ -238,7 +338,8 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
             "categorization_question": CanonicalQuestionType.CATEGORIZATION,
         }
         if canvas_type:
-            return type_map.get(canvas_type.value if hasattr(canvas_type, 'value') else str(canvas_type), CanonicalQuestionType.UNKNOWN)
+            canvas_val = canvas_type.value if hasattr(canvas_type, 'value') else str(canvas_type)
+            return type_map.get(canvas_val, CanonicalQuestionType.UNKNOWN)
         return CanonicalQuestionType.UNKNOWN
     
     def _map_content_type(self, canvas_type: str) -> CanonicalContentType:
@@ -252,6 +353,8 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
             "assignment": CanonicalContentType.ASSIGNMENT,
             "discussion": CanonicalContentType.DISCUSSION,
             "weblink": CanonicalContentType.WEBLINK,
+            "externaltool": CanonicalContentType.EXTERNAL_TOOL,
+            "lti": CanonicalContentType.EXTERNAL_TOOL,
         }
         return type_map.get(canvas_type.lower(), CanonicalContentType.LESSON)
 

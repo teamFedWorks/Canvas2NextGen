@@ -849,33 +849,39 @@ def generate_html(report: Dict[str, Any]) -> str:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def save_report(report: Dict[str, Any], output_path: Path) -> Path:
+    """Save the report as JSON and HTML."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save JSON
+    json_path = output_path.with_suffix(".json")
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, default=str)
+    
+    # Save HTML
+    html_path = output_path.with_suffix(".html")
+    html = generate_html(report)
+    with open(html_path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+        
+    return html_path
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate consolidated ingestion report")
     parser.add_argument("--course",   metavar="NAME", help="Filter to a specific course (substring match)")
     parser.add_argument("--root",     metavar="DIR",  default=str(ROOT_DIR), help=f"Uploads root directory (default: {ROOT_DIR})")
-    parser.add_argument("--output",   metavar="FILE", default=str(OUTPUT_JSON), help=f"JSON output path (default: {OUTPUT_JSON})")
+    parser.add_argument("--output",   metavar="FILE", default=str(OUTPUT_JSON), help=f"JSON/HTML output path (default: {OUTPUT_JSON})")
     parser.add_argument("--no-html",  action="store_true", help="Skip HTML report generation")
     args = parser.parse_args()
 
     root_dir    = Path(args.root)
-    output_json = Path(args.output)
-    output_html = output_json.with_suffix(".html")
+    output_path = Path(args.output)
 
     report = generate_report(root_dir, course_filter=args.course)
-
     print_report(report)
 
-    output_json.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_json, "w", encoding="utf-8") as fh:
-        json.dump(report, fh, indent=2, default=str)
-    print(f"\nJSON report saved to: {output_json}")
-
-    if not args.no_html:
-        html = generate_html(report)
-        with open(output_html, "w", encoding="utf-8") as fh:
-            fh.write(html)
-        print(f"HTML report saved to: {output_html}")
-
+    save_report(report, output_path)
+    print(f"\nReports saved to: {output_path.with_suffix('')}.[json/html]")
 
 if __name__ == "__main__":
     main()

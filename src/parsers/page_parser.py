@@ -178,7 +178,7 @@ class PageParser:
             for href, res_id in resource_href_map.items():
                 href_to_res_id[href.replace("\\", "/").lower()] = res_id
 
-        # ── wiki_content/ ────────────────────────────────────────────────────
+# ── wiki_content/ ────────────────────────────────────────────────────
         if self.wiki_content_dir.exists():
             for page_file in self.wiki_content_dir.glob("*.xml"):
                 page = self.parse_page(page_file)
@@ -211,5 +211,143 @@ class PageParser:
                 page = self.parse_html_page(html_file, identifier=res_id)
                 if page:
                     pages.append(page)
+            
+            # Also process IPYNB, PDF, and CSV files referenced in manifest
+            for ext, parse_func in [(".ipynb", self._parse_ipynb), (".pdf", self._parse_pdf), (".csv", self._parse_csv)]:
+                for resource_file in self.web_resources_dir.rglob(f"*{ext}"):
+                    rel_href = resource_file.relative_to(self.course_directory)
+                    rel_key  = str(rel_href).replace("\\", "/").lower()
+                    res_id   = href_to_res_id.get(rel_key)
+                    if res_id is None:
+                        continue
+                    page = parse_func(resource_file, identifier=res_id)
+                    if page:
+                        pages.append(page)
 
         return pages
+    
+    def _parse_ipynb(self, ipynb_file: Path, identifier: str) -> Optional[CanvasPage]:
+        """Extract content from Jupyter notebook (.ipynb)."""
+        try:
+            import json
+            with open(ipynb_file, 'r', encoding='utf-8') as f:
+                nb = json.load(f)
+            
+            cells = nb.get('cells', [])
+            content_parts = []
+            for cell in cells:
+                cell_type = cell.get('cell_type', '')
+                source = cell.get('source', [])
+                if isinstance(source, list):
+                    source = ''.join(source)
+                if source.strip():
+                    if cell_type == 'markdown':
+                        # Convert markdown to HTML (basic)
+                        from utils.html_utils import basic_markdown_to_html
+                        content_parts.append(basic_markdown_to_html(source))
+                    elif cell_type == 'code':
+                        content_parts.append(f"<pre><code>{source}</code></pre>")
+                    else:
+                        content_parts.append(f"<p>{source}</p>")
+            
+            body = '\n'.join(content_parts)
+            if len(body.strip()) < 10:
+                return None
+            
+            title = nb.get('metadata', {}).get('name', ipynb_file.stem)
+            return CanvasPage(
+                title=title,
+                identifier=identifier,
+                body=body,
+                workflow_state=WorkflowState.ACTIVE,
+                source_file=str(ipynb_file)
+            )
+        except Exception as e:
+            self.errors.append(MigrationError(
+                severity=ErrorSeverity.WARNING,
+                error_type="IPYNB_PARSE_ERROR",
+                message=f"Failed to parse notebook: {str(e)}",
+                file_path=str(ipynb_file),
+                suggested_action="File will be skipped"
+            ))
+            return None
+    
+    def _parse_pdf(self, pdf_file: Path, identifier: str) -> Optional[CanvasPage]:
+        """Extract text content from PDF file."""
+        try:
+            import PyPDF2
+            from utils.html_utils import sanitize_html
+            
+            with open(pdf_file, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                text_parts = []
+                for page in reader.pages[:10]:  # Limit to first 10 pages
+                    text = page.extract_text()
+                    if text:
+                        text_parts.append(f"<p>{text}</p>")
+            
+            body = '\n'.join(text_parts)
+            if len(body.strip()) < 10:
+                return None
+            
+            return CanvasPage(
+                title=pdf_file.stem,
+                identifier=identifier,
+                body=sanitize_html(body),
+                workflow_state=WorkflowState.ACTIVE,
+                source_file=str(pdf_file)
+            )
+        except ImportError:
+            self.errors.append(MigrationError(
+                severity=ErrorSeverity.INFO,
+                error_type="PDF_NO_PARSER",
+                message="PyPDF2 not installed - cannot extract PDF content",
+                file_path=str(pdf_file),
+                suggested_action="pip install PyPDF2"
+            ))
+            return None
+        except Exception as e:
+            self.errors.append(MigrationError(
+                severity=ErrorSeverity.WARNING,
+                error_type="PDF_PARSE_ERROR",
+                message=f"Failed to parse PDF: {str(e)}",
+                file_path=str(pdf_file),
+                suggested_action="File will be skipped"
+            ))
+            return None
+    
+    def _parse_csv(self, csv_file: Path, identifier: str) -> Optional[CanvasPage]:
+        """Extract preview from CSV file."""
+        try:
+            import csv
+            from utils.html_utils import sanitize_html
+            
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)[:20]  # Limit to first 20 rows
+            
+            if not rows:
+                return None
+            
+            rows_html = []
+            for row in rows:
+                cells = ''.join(f"<td>{sanitize_html(cell)}</td>" for cell in row)
+                rows_html.append(f"<tr>{cells}</tr>")
+            
+            body = f"<table>{''.join(rows_html)}</table>"
+            return CanvasPage(
+                title=csv_file.stem,
+                identifier=identifier,
+                body=body,
+                workflow_state=WorkflowState.ACTIVE,
+                source_file=str(csv_file)
+            )
+        except Exception as e:
+            self.errors.append(MigrationError(
+                severity=ErrorSeverity.WARNING,
+                error_type="CSV_PARSE_ERROR",
+                message=f"Failed to parse CSV: {str(e)}",
+                file_path=str(csv_file),
+                suggested_action="File will be skipped"
+            ))
+            return None

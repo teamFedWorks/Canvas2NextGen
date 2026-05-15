@@ -361,3 +361,70 @@ def get_body_content(html_content: str) -> str:
         return soup.body.decode_contents()
     return ""
 
+
+def basic_markdown_to_html(markdown: str) -> str:
+    """
+    Convert basic markdown to HTML.
+    
+    Handles headers, bold, italic, code, lists, links, and paragraphs.
+    """
+    if not markdown:
+        return ""
+    
+    lines = markdown.split('\n')
+    html_parts = []
+    in_list = False
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Headers
+        if stripped.startswith('### '):
+            if in_list:
+                html_parts.append('</ul>')
+                in_list = False
+            html_parts.append(f'<h3>{stripped[4:]}</h3>')
+        elif stripped.startswith('## '):
+            if in_list:
+                html_parts.append('</ul>')
+                in_list = False
+            html_parts.append(f'<h2>{stripped[3:]}</h2>')
+        elif stripped.startswith('# '):
+            if in_list:
+                html_parts.append('</ul>')
+                in_list = False
+            html_parts.append(f'<h1>{stripped[2:]}</h1>')
+        # List items
+        elif stripped.startswith('- ') or stripped.startswith('* '):
+            if not in_list:
+                html_parts.append('<ul>')
+                in_list = True
+            html_parts.append(f'<li>{stripped[2:]}</li>')
+        elif in_list and not stripped:
+            html_parts.append('</ul>')
+            in_list = False
+        # Empty line
+        elif not stripped and in_list:
+            html_parts.append('</ul>')
+            in_list = False
+        # Regular text - handle inline formatting
+        elif stripped:
+            # Escape HTML first
+            text = stripped.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            # Bold
+            text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+            text = re.sub(r'__([^_]+)__', r'<strong>\1</strong>', text)
+            # Italic
+            text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
+            text = re.sub(r'_([^_]+)_', r'<em>\1</em>', text)
+            # Code
+            text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+            # Links
+            text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+            html_parts.append(f'<p>{text}</p>')
+    
+    if in_list:
+        html_parts.append('</ul>')
+    
+    return '\n'.join(html_parts)
+

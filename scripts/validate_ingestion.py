@@ -681,13 +681,14 @@ def _mapping_summary(r: ValidationReport) -> str:
     every Canvas content type and how it mapped into the LMS.
     """
     # Count by type across all modules — Fix 2: exclude SKIP items from coverage
-    counts = {"Lesson": [0,0], "Quiz": [0,0], "Assignment": [0,0], "Other": [0,0]}
+    import collections
+    counts = collections.defaultdict(lambda: [0, 0])
     # [pass_count, warn_count]
     for m in r.module_results:
         for i in m.items:
             if i.status == Status.SKIP:
                 continue  # nav placeholders don't count toward accuracy
-            key = i.item_type if i.item_type in counts else "Other"
+            key = i.item_type
             if i.status == Status.PASS:
                 counts[key][0] += 1
             else:
@@ -699,11 +700,24 @@ def _mapping_summary(r: ValidationReport) -> str:
     pct = round(total_pass / total_items * 100) if total_items else 0
 
     canvas_types = {
-        "Lesson":     ("webcontent / wiki page / HTML",   "LMS Lesson (HTML content)"),
+        "Lesson":     ("webcontent / HTML",               "LMS Lesson (Instructional)"),
+        "Reading":    ("textbook / PDF / reading",        "LMS Reading (Reference material)"),
+        "Policy":     ("syllabus / grading / rules",      "LMS Policy (Course governance)"),
+        "Resource":   ("support / docs / tutorial",       "LMS Resource (Supporting material)"),
+        "LiveSession":("zoom / webinar / synchronous",    "LMS Live Session"),
+        "Announcement":("announcement / welcome",         "LMS Announcement"),
+        "Survey":     ("course evaluation / survey",      "LMS Survey"),
         "Quiz":       ("imsqti assessment / QTI XML",     "LMS Quiz (with quizConfig)"),
         "Assignment": ("canvas:assignment XML",           "LMS Assignment (with assignmentConfig)"),
-        "Other":      ("discussion / weblink / download", "LMS Lesson (embedded link or attachment)"),
+        "Discussion": ("discussion topic",                "LMS Discussion Board"),
+        "ExternalTool":("lti / 3rd party",                "LMS External Tool"),
+        "Other":      ("misc types",                      "LMS Generic Item"),
     }
+    
+    # Ensure any unexpected types fall back to "Other" but get printed
+    for k in list(counts.keys()):
+        if k not in canvas_types:
+            canvas_types[k] = ("unknown / unmapped", f"LMS Custom Type ({k})")
 
     rows = ""
     for lms_type, (canvas_src, lms_dest) in canvas_types.items():

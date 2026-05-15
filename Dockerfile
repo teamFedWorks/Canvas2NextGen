@@ -33,5 +33,5 @@ ENV PYTHONPATH=/app
 ENV STORAGE_DIR=/app/storage/tmp
 ENV PORT=5009
 
-# Start the FastAPI application via the unified server entry point
-CMD ["python", "server.py"]
+# Start the FastAPI application via the professional unified hub
+CMD ["python", "main.py", "serve"]

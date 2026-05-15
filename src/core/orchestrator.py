@@ -9,6 +9,7 @@ Coordinates:
 - Parallel stage execution coordination
 """
 
+import uuid
 import asyncio
 from typing import Optional, Callable, Dict, Any, List
 from datetime import datetime, timedelta
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 
 from .job_state_machine import IngestionJob, JobState, JobCheckpoint
 from .idempotency import IdempotencyService, IdempotencyKey, ContentHash
-from .tracing import TracingMiddleware, get_correlation_id, TraceLogger
+from observability.tracing import TracingMiddleware, get_correlation_id, TraceLogger
 from utils.resilience import retry
 
 logger = TraceLogger(__name__)

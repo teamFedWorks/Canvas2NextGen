@@ -14,7 +14,11 @@ from dataclasses import asdict
 import bson
 from pymongo import MongoClient
 
-from models.canonical_models import CanonicalCourse, CanonicalModule, CanonicalAssessment, CanonicalAsset
+from models.canonical_models import (
+    CanonicalCourse, CanonicalModule, CanonicalCurriculumItem,
+    CanonicalAssessment, CanonicalQuestion, CanonicalAsset,
+    CanonicalContentType, CanonicalQuestionType, SourcePlatform
+)
 from observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -44,6 +48,48 @@ class ChunkedMongoExporter:
             self._client = MongoClient(self.uri)
             self._db = self._client[self.db_name]
     
+    def _canonical_to_dict(self, obj) -> Any:
+        """
+        Recursively convert canonical models to BSON-safe dicts.
+        
+        Handles:
+        - Enums -> .value
+        - Dataclasses -> dict
+        - Lists -> converted elements
+        - Datetime -> ISO string
+        """
+        if obj is None:
+            return None
+        
+        # Handle enums
+        if isinstance(obj, (CanonicalContentType, CanonicalQuestionType, SourcePlatform)):
+            return obj.value
+        
+        # Handle datetime
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        
+        # Handle dataclasses
+        if hasattr(obj, '__dict__'):
+            result = {}
+            for key, value in obj.__dict__.items():
+                # Skip private fields
+                if key.startswith('_'):
+                    continue
+                result[key] = self._canonical_to_dict(value)
+            return result
+        
+        # Handle lists
+        if isinstance(obj, list):
+            return [self._canonical_to_dict(item) for item in obj]
+        
+        # Handle dicts
+        if isinstance(obj, dict):
+            return {k: self._canonical_to_dict(v) for k, v in obj.items()}
+        
+        # Primitive
+        return obj
+    
     def export_canonical_course(self, canonical: CanonicalCourse, university_id: str, author_id: str) -> str:
         """
         Export a canonical course in chunks.
@@ -57,22 +103,20 @@ class ChunkedMongoExporter:
         course_id = None
         
         # 1. Export base course document (metadata only)
-        course_doc = {
+        course_doc = self._canonical_to_dict(canonical)
+        course_doc.update({
             "slug": course_slug,
-            "title": canonical.title,
-            "description": canonical.description,
-            "sourcePlatform": canonical.source_platform.value,
-            "sourceCourseId": canonical.source_course_id,
-            "courseCode": canonical.course_code,
-            "department": canonical.department,
             "universityId": university_id,
             "authorId": author_id,
             "status": "published",
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow(),
-            "contentCounts": canonical.get_content_counts(),
-            "parsingWarnings": canonical.parsing_warnings,
-        }
+        })
+        
+        # Remove bulky arrays to keep document small (chunked data in separate collections)
+        course_doc.pop('modules', None)
+        course_doc.pop('assessments', None)
+        course_doc.pop('assets', None)
         
         # Upsert
         result = self._db['courses'].replace_one(

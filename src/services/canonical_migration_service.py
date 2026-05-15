@@ -17,11 +17,12 @@ from datetime import datetime
 
 from core.canonical_pipeline import CanonicalPipeline
 from core.orchestrator import JobOrchestrator, InMemoryJobStore, MongoDBJobStore
-from core.idempotency import IdempotencyService, ContentHash
+from core.idempotency import IdempotencyService, ContentHash, IdempotencyKey
 from core.classifier import classify_source, ClassificationResult
 from core.job_state_machine import IngestionJob, JobState
 from observability.tracing import TracingMiddleware, get_correlation_id
 from utils.s3_utils import S3Downloader
+from observability.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -268,3 +269,25 @@ class CanonicalMigrationService:
             "warnings": job.warnings,
             "checkpoints": len(job.checkpoints),
         }
+
+
+# Global singleton instance
+_migration_service: Optional[CanonicalMigrationService] = None
+
+def get_migration_service() -> CanonicalMigrationService:
+    """Get or create the global migration service singleton."""
+    global _migration_service
+    if _migration_service is None:
+        _migration_service = CanonicalMigrationService()
+    return _migration_service
+
+
+# Global singleton instance
+_migration_service: Optional[CanonicalMigrationService] = None
+
+def get_migration_service() -> CanonicalMigrationService:
+    """Get or create the global migration service singleton."""
+    global _migration_service
+    if _migration_service is None:
+        _migration_service = CanonicalMigrationService()
+    return _migration_service
