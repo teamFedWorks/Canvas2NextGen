@@ -121,6 +121,9 @@ def fetch_institution(university_id, course: Optional[Dict] = None) -> tuple:
     try:
         prog = db.programs.find_one({"universityId": str(university_id)})
         if prog:
+            prog_title = (prog.get("title") or prog.get("name") or "").upper()
+            if "WAYLAND" in prog_title or "WBU" in prog_title:
+                return "WBU", "Wayland Baptist University"
             return "SFC", "St. Francis College"
     except Exception:
         pass
@@ -556,7 +559,30 @@ def validate_modules(course: Dict) -> Tuple[List[ModuleResult],int,int]:
                     attachments=len(atts)
                 ))
             else:
-                detail = f"{len(atts)} file(s) attached to this item" if has_atts else "Content imported successfully"
+                # Build detail string — include semantic metadata when present
+                semantic_parts = []
+                inst_type = item.get("instructionalType")
+                interaction = item.get("interactionLevel")
+                duration = item.get("estimatedDuration")
+                confidence = item.get("classificationConfidence")
+                outcomes = item.get("learningOutcomes") or []
+
+                if inst_type:
+                    semantic_parts.append(f"type: {inst_type}")
+                if interaction:
+                    semantic_parts.append(f"interaction: {interaction}")
+                if duration:
+                    semantic_parts.append(f"~{duration} min")
+                if confidence is not None and confidence < 1.0:
+                    semantic_parts.append(f"confidence: {confidence:.0%}")
+
+                if has_atts:
+                    base_detail = f"{len(atts)} file(s) attached"
+                else:
+                    base_detail = "Content imported successfully"
+
+                detail = f"{base_detail}  [{', '.join(semantic_parts)}]" if semantic_parts else base_detail
+
                 item_results.append(ItemResult(
                     title=t, item_type=itype, status=Status.PASS,
                     detail=detail, attachments=len(atts)

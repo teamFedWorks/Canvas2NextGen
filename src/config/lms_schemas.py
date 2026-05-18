@@ -67,9 +67,14 @@ DOWNLOAD_EXTENSIONS = {".ipynb", ".csv", ".zip", ".txt", ".rb", ".py", ".js", ".
 UPLOADABLE_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | DOCUMENT_EXTENSIONS | DOWNLOAD_EXTENSIONS
 
 # ---------------------------------------------------------------------------
-# S3 key prefix template
-# Usage: S3_KEY_TEMPLATE.format(institution=..., course_id=..., filename=...)
-# Assets are stored under {institution}/{course_id}/ so SFC and WBU assets
-# are cleanly separated in the CDN bucket.
+# S3 key prefix template — hierarchical, human-readable structure
+#
+# Full path:  {institution}/{program}/{course_code}/{module}/{content_type}/{filename}
+# Example:    SFC/bs-information-technology/ENT-1001/module-01-intro/lessons/overview-of-apa.html
+# Example:    SFC/bs-information-technology/IT-1104/module-04-week-4/quizzes/quiz-1-week-4.pdf
+# Example:    WBU/mgmt-5306/module-01-week-1/assignments/ab-1.pdf
+#
+# Fallback (no module context):  {institution}/{program}/{course_code}/assets/{filename}
 # ---------------------------------------------------------------------------
-S3_KEY_TEMPLATE = "{institution}/{course_id}/{filename}"
+S3_KEY_TEMPLATE          = "{institution}/{program}/{course_code}/{module}/{content_type}/{filename}"
+S3_KEY_TEMPLATE_NO_MODULE = "{institution}/{program}/{course_code}/assets/{filename}"

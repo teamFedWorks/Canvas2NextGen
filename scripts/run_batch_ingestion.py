@@ -39,32 +39,40 @@ def discover_courses(uploads_root: Path) -> list[tuple[str, Path]]:
     """
     Walk uploads_root and return (program_name, course_folder) for every
     course directory that contains an imsmanifest.xml.
+
+    Supports two layouts:
+      Layout A (standard):  uploads_root/program/course/imsmanifest.xml
+      Layout B (flat):      uploads_root/course/imsmanifest.xml
+                            (when uploads_root IS the program folder)
     """
     courses = []
-    for program_dir in sorted(uploads_root.iterdir()):
-        if not program_dir.is_dir():
+
+    for entry in sorted(uploads_root.iterdir()):
+        if entry.name in SKIP_NAMES or not entry.is_dir():
             continue
-        program_name = program_dir.name
-        for entry in sorted(program_dir.iterdir()):
-            if entry.name in SKIP_NAMES:
-                continue
-            if not entry.is_dir():
-                continue
-            # Must contain imsmanifest.xml to be a valid Canvas export
-            if not (entry / "imsmanifest.xml").exists():
-                # Check one level deeper (some exports have a nested folder)
-                nested = [d for d in entry.iterdir() if d.is_dir() and (d / "imsmanifest.xml").exists()]
-                if nested:
-                    for n in nested:
-                        courses.append((program_name, n))
-                else:
-                    # Handle encoding issues when printing
-                    try:
-                        print(f"  [SKIP] No imsmanifest.xml in {entry.relative_to(uploads_root)} — skipping")
-                    except UnicodeEncodeError:
-                        print(f"  [SKIP] No imsmanifest.xml in [encoding issue] — skipping")
+
+        # Layout A: entry is a program folder — look for courses inside it
+        if not (entry / "imsmanifest.xml").exists():
+            found_any = False
+            for sub in sorted(entry.iterdir()):
+                if sub.name in SKIP_NAMES or not sub.is_dir():
                     continue
-            courses.append((program_name, entry))
+                if (sub / "imsmanifest.xml").exists():
+                    courses.append((entry.name, sub))
+                    found_any = True
+                else:
+                    # One more level deep (nested export)
+                    nested = [d for d in sub.iterdir() if d.is_dir() and (d / "imsmanifest.xml").exists()]
+                    for n in nested:
+                        courses.append((entry.name, n))
+                        found_any = True
+            if not found_any:
+                # Layout B: entry itself is a course folder — use parent name as program
+                pass  # already handled below
+        else:
+            # Layout B: entry IS the course folder (imsmanifest.xml at root)
+            courses.append((uploads_root.name, entry))
+
     return courses
 
 

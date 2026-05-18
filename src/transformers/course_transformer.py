@@ -44,7 +44,7 @@ class CourseTransformer:
         lms_course = LmsCourse(
             university=university_id or os.getenv("DEFAULT_UNIVERSITY_ID", "000000000000000000000000"),
             authorId=author_id or os.getenv("DEFAULT_AUTHOR_ID", "000000000000000000000000"),
-            authorName="Admin SFC",
+            authorName="Admin",
             title=canvas_course.title,
             slug=slug,
             courseUrl=slug,

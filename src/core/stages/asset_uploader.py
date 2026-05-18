@@ -32,7 +32,7 @@ except ImportError:
 
 from models.lms_models import LmsCourse, LmsCurriculumModule, LmsCurriculumItem, LmsAttachment
 from models.canvas_models import CanvasCourse
-from config.lms_schemas import UPLOADABLE_EXTENSIONS, S3_KEY_TEMPLATE
+from config.lms_schemas import UPLOADABLE_EXTENSIONS, S3_KEY_TEMPLATE, S3_KEY_TEMPLATE_NO_MODULE
 from observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -50,18 +50,26 @@ class AssetUploader:
         course_id: str, 
         source_dir: Optional[Path] = None, 
         cdn_url: str = "",
-        institution: str = "SFC",
+        institution: str = "",
+        program_slug: str = "general",
+        course_code: str = "IMPORTED",
     ):
         """
         Initialize the uploader.
 
         Args:
-            institution: Institution code (e.g. 'SFC' or 'WBU').  Used as the
-                         top-level S3 prefix so assets from different institutions
-                         are stored in separate folders.
+            institution:  Institution code (e.g. 'SFC' or 'WBU').
+            program_slug: URL-safe program name (e.g. 'bs-information-technology').
+            course_code:  Course code (e.g. 'ENT-1001', 'MGMT-5306').
         """
+        resolved_institution = (institution or "").strip()
+        if not resolved_institution:
+            resolved_institution = os.getenv("DEFAULT_INSTITUTION", "")
+
         self.course_id = course_id
-        self.institution = institution or "SFC"
+        self.institution = resolved_institution
+        self.program_slug = self._slugify(program_slug or "general")
+        self.course_code = (course_code or "IMPORTED").upper().replace(" ", "-")
         self.source_dir = source_dir
         self.s3_bucket = s3_bucket
         self.cdn_base_url = (cdn_url or os.getenv("CDN_URL", "")).rstrip('/')
@@ -164,6 +172,54 @@ class AssetUploader:
 
         return True
 
+    @staticmethod
+    def _slugify(text: str) -> str:
+        """Convert any string to a lowercase URL-safe slug."""
+        import re as _re
+        text = str(text).lower().strip()
+        text = _re.sub(r'[^\w\s-]', '', text)
+        text = _re.sub(r'[\s_]+', '-', text)
+        text = _re.sub(r'-+', '-', text).strip('-')
+        return text or "general"
+
+    @staticmethod
+    def _item_type_to_folder(item_type: str) -> str:
+        """
+        Map an LMS item type to a meaningful S3 folder name.
+        Canvas/Blackboard/Moodle classification:
+          Lesson / Page / Reading  → lessons
+          Quiz / Assessment        → quizzes
+          Assignment               → assignments
+          Discussion               → discussions
+          Policy / Syllabus        → policies
+          Everything else          → assets
+        """
+        t = (item_type or "").lower()
+        if t in ("quiz", "assessment", "test", "exam"):
+            return "quizzes"
+        if t in ("assignment", "homework", "project", "submission"):
+            return "assignments"
+        if t in ("discussion", "forum", "board"):
+            return "discussions"
+        if t in ("policy", "syllabus", "rule"):
+            return "policies"
+        if t in ("reading", "lesson", "page", "lecture", "content"):
+            return "lessons"
+        return "assets"
+
+    @staticmethod
+    def _module_to_slug(position: int, title: str) -> str:
+        """
+        Convert a module position + title to a slug like 'module-01-intro-and-best-practices'.
+        Caps at 50 chars to keep S3 keys readable.
+        """
+        import re as _re
+        title_part = str(title).lower().strip()
+        title_part = _re.sub(r'[^\w\s-]', '', title_part)
+        title_part = _re.sub(r'[\s_]+', '-', title_part).strip('-')
+        title_part = _re.sub(r'-+', '-', title_part)[:40].strip('-')
+        return f"module-{position:02d}-{title_part}" if title_part else f"module-{position:02d}"
+
     def process_course_assets(self, lms_course: LmsCourse, canvas_course: Optional[CanvasCourse] = None) -> LmsCourse:
         """
         Full asset migration pass:
@@ -174,9 +230,17 @@ class AssetUploader:
         logger.info(f"Starting asset migration for course {self.course_id}")
 
         # Pass 1: HTML-embedded assets (images, videos, linked files in content)
-        for module in lms_course.curriculum:
+        for mod_idx, module in enumerate(lms_course.curriculum, 1):
+            module_slug = self._module_to_slug(mod_idx, module.title)
             for item in module.items:
-                item.content = self._process_html(item.content, item.attachments, canvas_course=canvas_course)
+                content_folder = self._item_type_to_folder(getattr(item, 'type', '') or '')
+                item.content = self._process_html(
+                    item.content,
+                    item.attachments,
+                    canvas_course=canvas_course,
+                    module_slug=module_slug,
+                    content_type_folder=content_folder,
+                )
 
         # Pass 2: Manifest-declared file resources not embedded in HTML
         if canvas_course and canvas_course.resources and self.source_dir:
@@ -224,7 +288,8 @@ class AssetUploader:
                 if title_key:
                     title_map[title_key] = item
 
-    def _upload_asset_task(self, href: str, res_id: str, ref_map: Dict, title_map: Dict, local_file: Path) -> Tuple[str, Optional[str], Path]:
+    def _upload_asset_task(self, href: str, res_id: str, ref_map: Dict, title_map: Dict, local_file: Path,
+                           module_slug: str = "assets", content_type_folder: str = "assets") -> Tuple[str, Optional[str], Path]:
         """
         Upload a single asset (for parallel execution).
         
@@ -252,7 +317,9 @@ class AssetUploader:
         s_url = self._perform_s3_upload(
             local_file, 
             filename=upload_filename,
-            content_type_override=params['content_type']
+            content_type_override=params['content_type'],
+            module_slug=module_slug,
+            content_type_folder=content_type_folder,
         )
         
         # Update cache and stats atomically
@@ -413,6 +480,8 @@ class AssetUploader:
         html_content: str,
         asset_list: Optional[List[LmsAttachment]] = None,
         canvas_course: Optional[CanvasCourse] = None,
+        module_slug: str = "assets",
+        content_type_folder: str = "assets",
     ) -> str:
         """
         Scan HTML for asset tags, migrate them to S3, and rewrite paths.
@@ -544,6 +613,8 @@ class AssetUploader:
                     local_path,
                     filename=upload_filename,
                     content_type_override=mime_type,
+                    module_slug=module_slug,
+                    content_type_folder=content_type_folder,
                 )
                 if s3_url and asset_list is not None:
                     ext = os.path.splitext(upload_filename)[1].upper().strip('.') or "FILE"
@@ -612,7 +683,7 @@ class AssetUploader:
 
                 # Determine if asset needs migration
                 if self._should_migrate(url):
-                    s3_url = self._migrate_asset(url)
+                    s3_url = self._migrate_asset(url, module_slug=module_slug, content_type_folder=content_type_folder)
                     if s3_url:
                         tag[attr] = s3_url
                         modified = True
@@ -676,17 +747,17 @@ class AssetUploader:
         # Local paths
         return True
 
-    def _migrate_asset(self, path_or_url: str) -> Optional[str]:
+    def _migrate_asset(self, path_or_url: str, module_slug: str = "assets", content_type_folder: str = "assets") -> Optional[str]:
         """Orchestrates asset migration from local or remote source."""
         if path_or_url in self.uploaded_assets:
             return self.uploaded_assets[path_or_url]
 
         if path_or_url.startswith('http'):
-            return self._download_and_upload(path_or_url)
+            return self._download_and_upload(path_or_url, module_slug=module_slug, content_type_folder=content_type_folder)
         else:
-            return self._upload_local(path_or_url)
+            return self._upload_local(path_or_url, module_slug=module_slug, content_type_folder=content_type_folder)
 
-    def _download_and_upload(self, url: str) -> Optional[str]:
+    def _download_and_upload(self, url: str, module_slug: str = "assets", content_type_folder: str = "assets") -> Optional[str]:
         """Download remote asset and upload to S3."""
         # Double-check cache in case failure was stored during this run
         if url in self.uploaded_assets:
@@ -702,7 +773,7 @@ class AssetUploader:
         temp_file = Path(tempfile.mktemp())
         try:
             headers = {}
-            if self.api_token and ('canvas' in url or 'sfc.edu' in url):
+            if self.api_token and ('canvas' in url or 'wbu.edu' in url):
                 headers["Authorization"] = f"Bearer {self.api_token}"
                 
             response = self.session.get(url, headers=headers, stream=True, timeout=45)
@@ -714,7 +785,7 @@ class AssetUploader:
             # Upload to S3
             filename = os.path.basename(url.split('?')[0])
             logger.info(f"  [S3] Uploading remote asset {filename}")
-            s3_url = self._perform_s3_upload(temp_file, filename)
+            s3_url = self._perform_s3_upload(temp_file, filename, module_slug=module_slug, content_type_folder=content_type_folder)
             
             self.uploaded_assets[url] = s3_url
             return s3_url
@@ -728,7 +799,7 @@ class AssetUploader:
             if temp_file.exists():
                 temp_file.unlink()
 
-    def _upload_local(self, relative_path: str) -> Optional[str]:
+    def _upload_local(self, relative_path: str, module_slug: str = "assets", content_type_folder: str = "assets") -> Optional[str]:
         """Upload local file from source_dir to S3 with xid resolution fallback."""
         if not self.source_dir:
             return None
@@ -743,7 +814,9 @@ class AssetUploader:
         s3_url = self._perform_s3_upload(
             local_file, 
             filename=params['filename'],
-            content_type_override=params['content_type']
+            content_type_override=params['content_type'],
+            module_slug=module_slug,
+            content_type_folder=content_type_folder,
         )
         self.uploaded_assets[relative_path] = s3_url
         return s3_url
@@ -813,14 +886,23 @@ class AssetUploader:
         local_path: Path,
         filename: str,
         content_type_override: Optional[str] = None,
+        module_slug: Optional[str] = "assets",
+        content_type_folder: Optional[str] = "assets",
     ) -> Optional[str]:
-        """Generic S3 upload logic with timestamp prefix."""
+        """
+        Generic S3 upload logic with full S3 key template expansion.
+
+        S3 key layout: {institution}/{program}/{course_code}/{module}/{content_type}/{filename}_{timestamp}
+        """
         import time
         timestamp = int(time.time() * 1000)
         ts_filename = f"{timestamp}_{filename}"
         s3_key = S3_KEY_TEMPLATE.format(
             institution=self.institution,
-            course_id=self.course_id,
+            program=self.program_slug,
+            course_code=self.course_code,
+            module=module_slug or "assets",
+            content_type=content_type_folder or "assets",
             filename=ts_filename,
         )
         try:

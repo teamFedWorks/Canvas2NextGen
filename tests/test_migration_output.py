@@ -11,7 +11,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from src.models.canvas_models import CanvasCourse, CanvasModule, CanvasModuleItem, CanvasPage
 from src.transformers.course_transformer import CourseTransformer
-from src.exporters.mongodb_uploader import MongoDBUploader
+from src.exporters.mongodb_exporter import MongoDBExporter
 from src.models.lms_models import LmsCourse
 
 def test_transformation_structure():
@@ -45,13 +45,13 @@ def test_transformation_structure():
     print(f"Transformation Report Errors: {report.errors}")
     assert len(report.errors) == 0
     assert lms_course.university == university_id
-    assert lms_course.author_id == author_id
-    assert lms_course.course_code == "CS101"
+    assert lms_course.authorId == author_id
+    assert lms_course.courseCode == "CS101"
     assert lms_course.slug == "test-course"
     
     # 3. Simulate MongoDB Uploader conversion logic
     # We want to see the dictionary that goes into the DB
-    uploader = MongoDBUploader()
+    uploader = MongoDBExporter()
     
     # We'll monkeypatch or just call a helper if we had one, 
     # but let's just inspect what write_lms_course would do by looking at the logic.

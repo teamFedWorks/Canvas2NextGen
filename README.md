@@ -1,6 +1,6 @@
-# Canvas to EduvateHub — Course Onboarding Pipeline
+# Canvas & Blackboard to EduvateHub — Course Onboarding Pipeline
 
-A production-grade Python pipeline for migrating Canvas LMS course exports (IMS-CC / IMSCC) into the EduvateHub custom MERN-stack LMS. Handles parsing, transformation, S3 asset upload, MongoDB export, and post-ingestion validation — fully automated.
+A production-grade Python pipeline for migrating **Canvas LMS** (IMS-CC / IMSCC) and **Blackboard Learn Ultra** course exports into the EduvateHub custom MERN-stack LMS. Handles parsing, transformation, S3 asset upload, MongoDB export, and post-ingestion validation — fully automated.
 
 ---
 
@@ -53,14 +53,16 @@ cp .env.example .env
 | `MONGODB_URI` | MongoDB connection string |
 | `MONGODB_DATABASE` | Target database name (default: `lms_db`) |
 | `S3_CDN_BUCKET` | S3 bucket where course assets are uploaded |
-| `S3_INGESTION_BUCKET` | S3 bucket where raw Canvas ZIP packages are stored |
+| `S3_INGESTION_BUCKET` | S3 bucket where raw course ZIP packages are stored |
 | `CDN_URL` | CDN base URL used to rewrite asset links in content |
 | `AWS_ACCESS_KEY_ID` | AWS access key |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key |
 | `AWS_REGION` | AWS region (default: `us-east-1`) |
 | `CANVAS_API_TOKEN` | Canvas API token for remote asset downloads |
-| `DEFAULT_UNIVERSITY_ID` | Default university MongoDB ObjectId |
-| `DEFAULT_AUTHOR_ID` | Default author MongoDB ObjectId |
+| `DEFAULT_UNIVERSITY_ID` | Default university MongoDB ObjectId (SFC) |
+| `DEFAULT_AUTHOR_ID` | Default author MongoDB ObjectId (SFC) |
+| `WBU_UNIVERSITY_ID` | WBU university MongoDB ObjectId — auto-used when `--institution WBU` |
+| `WBU_AUTHOR_ID` | WBU author MongoDB ObjectId — auto-used when `--institution WBU` |
 | `PORT` | API server port (default: `5009`) |
 
 ---
@@ -72,6 +74,8 @@ cp .env.example .env
 ├── main.py                             # Unified CLI entry point (serve | ingest | worker | report)
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml
+├── onboarding_cli/
+│   └── commands.py                    # CLI command implementations
 │
 ├── scripts/
 │   ├── validate_ingestion.py          # Post-ingestion validation report (auto-runs)
@@ -82,20 +86,15 @@ cp .env.example .env
 │
 ├── src/
 │   ├── api/                           # FastAPI routes & middleware
-│   ├── adapters/                      # ZIP and Canvas API adapters
+│   ├── adapters/
+│   │   ├── zip_adapter.py             # Canvas IMS-CC ZIP adapter (auto-routes to BB adapter)
+│   │   ├── blackboard_adapter.py      # Blackboard Learn Ultra export adapter
+│   │   └── canvas_adapter.py          # Canvas API adapter
 │   ├── core/
 │   │   └── stages/                    # package_validator, parser, asset_uploader
-│   ├── parsers/                       # Per-content-type parsers
-│   │   ├── manifest_parser.py         # imsmanifest.xml — course structure
-│   │   ├── page_parser.py             # wiki_content pages (XML + HTML)
-│   │   ├── assignment_parser.py       # Canvas assignment XML
-│   │   ├── quiz_parser.py             # QTI assessments
-│   │   ├── discussion_parser.py       # Discussion topics
-│   │   ├── weblink_parser.py          # External URL resources
-│   │   ├── pptx_parser.py             # PowerPoint → HTML + cover thumbnail
-│   │   └── orphaned_content_handler.py
+│   ├── parsers/                       # Per-content-type parsers (Canvas)
 │   ├── transformers/
-│   │   └── course_transformer.py      # Canvas models → LMS curriculum models
+│   │   └── course_transformer.py      # Canvas/BB models → LMS curriculum models
 │   ├── exporters/
 │   │   └── mongodb_exporter.py        # Upsert to MongoDB with deduplication
 │   ├── models/                        # Canvas, LMS, and report dataclasses
@@ -106,7 +105,9 @@ cp .env.example .env
 │   └── observability/                 # Structured JSON logger
 │
 └── storage/
-    ├── uploads/                       # Course export folders (git-ignored)
+    ├── uploads/
+    │   ├── SFC/                       # St. Francis College — Canvas IMS-CC exports
+    │   └── WBU/                       # Wayland Baptist University — Blackboard exports
     └── outputs/                       # Validation reports (git-ignored)
 ```
 
@@ -114,12 +115,12 @@ cp .env.example .env
 
 ## CLI — Course Ingestion
 
-All ingestion commands go through `main.py`. A validation report is **automatically generated** after every successful ingestion and saved to `storage/outputs/`.
+All ingestion commands go through `main.py`. A validation report is **automatically generated** after every successful ingestion and saved to `storage/outputs/<INSTITUTION>/`.
 
-### Ingest a local directory or ZIP
+### Ingest a local Canvas ZIP or directory (SFC)
 
 ```bash
-python main.py ingest zip --path "storage/uploads/BS Information Technology/IT-1104 Programming I"
+python main.py ingest zip --path "storage/uploads/SFC/BS Information Technology/IT-1104 Programming I"
 ```
 
 ```bash
@@ -129,24 +130,57 @@ python main.py ingest zip --path path/to/course.zip --uni <UNIVERSITY_ID> --auth
 | Flag | Required | Description |
 |---|---|---|
 | `--path` | Yes | Path to a Canvas export `.zip` file or extracted directory |
-| `--uni` | No | University ObjectId (falls back to `DEFAULT_UNIVERSITY_ID`) |
-| `--author` | No | Author ObjectId (falls back to `DEFAULT_AUTHOR_ID`) |
+| `--institution` | No | Institution code — `SFC` (default) or `WBU` |
+| `--uni` | No | University ObjectId (falls back to `DEFAULT_UNIVERSITY_ID` or `WBU_UNIVERSITY_ID`) |
+| `--author` | No | Author ObjectId (falls back to `DEFAULT_AUTHOR_ID` or `WBU_AUTHOR_ID`) |
 | `--force` | No | Force re-import even if course already exists |
+
+### Ingest a WBU Blackboard export (local ZIP or extracted folder)
+
+The pipeline **auto-detects** Blackboard packages — no extra flags needed beyond `--institution WBU`.
+
+```bash
+# From the extracted folder
+python main.py ingest zip \
+  --path "storage/uploads/WBU/phd-course-shell" \
+  --institution WBU
+
+# From the ZIP file directly
+python main.py ingest zip \
+  --path "storage/uploads/WBU/phd-course-shell.zip" \
+  --institution WBU
+```
+
+WBU IDs are resolved automatically from `WBU_UNIVERSITY_ID` / `WBU_AUTHOR_ID` in `.env`.  
+Pass `--uni` / `--author` explicitly to override.
 
 ### Batch ingest from S3
 
 ```bash
+# SFC — Canvas courses
 python main.py ingest s3 --institution SFC --workers 4
+
+# WBU — Blackboard courses (IDs resolved from WBU_UNIVERSITY_ID / WBU_AUTHOR_ID)
+python main.py ingest s3 --institution WBU --workers 4
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--institution` | Yes | Institution folder name in S3 (e.g. SFC, WBU) |
+| `--institution` | Yes | Institution folder name in S3 (`SFC` or `WBU`) |
+| `--workers` | No | Parallel download threads (default: `4`) |
 | `--program` | No | Limit to one program slug |
 | `--course` | No | Limit to one course code prefix |
-| `--uni` | No | University ObjectId |
-| `--author` | No | Author ObjectId |
+| `--uni` | No | University ObjectId override |
+| `--author` | No | Author ObjectId override |
 | `--force` | No | Force re-import |
+| `--dry-run` | No | List packages without ingesting |
+
+### Batch ingest from local uploads folder
+
+```bash
+python main.py ingest batch
+python main.py ingest batch --uploads storage/uploads/WBU --force
+```
 
 ### Ingest from Canvas API
 
@@ -158,7 +192,7 @@ python main.py ingest canvas --course-id <CANVAS_COURSE_ID> --uni <UNIVERSITY_ID
 
 ## Post-Ingestion Validation Report
 
-After every successful ingestion the pipeline **automatically** runs `scripts/validate_ingestion.py` and saves an HTML + JSON report to `storage/outputs/validation_<slug>.html`.
+After every successful ingestion the pipeline **automatically** runs `scripts/validate_ingestion.py` and saves an HTML + JSON report to `storage/outputs/<INSTITUTION>/validation_<slug>.html`.
 
 You can also run it manually at any time:
 
@@ -167,7 +201,7 @@ You can also run it manually at any time:
 python scripts/validate_ingestion.py --course-id <MONGO_ID>
 
 # By course slug
-python scripts/validate_ingestion.py --slug it-1104-01-25fa
+python scripts/validate_ingestion.py --slug mgmt-5306-spring-1st8wks-2026-vc01
 
 # Strict mode — exits non-zero on any warning
 python scripts/validate_ingestion.py --course-id <MONGO_ID> --strict
@@ -180,7 +214,7 @@ python scripts/validate_ingestion.py --course-id <MONGO_ID> --no-json
 
 | Section | What it checks |
 |---|---|
-| **Course Mapping Status** | Canvas content type → LMS type coverage with progress bars per type (Lesson, Quiz, Assignment) |
+| **Course Mapping Status** | Source content type → LMS type coverage with progress bars per type (Lesson, Quiz, Assignment) |
 | **Course Structure Integrity** | All required MongoDB fields present and populated |
 | **Module & Component Validation** | Every module item has content or S3 attachments; explains WHY any item is flagged |
 | **Asset Storage Validation (S3)** | HEAD-checks every uploaded file against S3 to confirm it exists and is non-zero |
@@ -202,10 +236,10 @@ The HTML report includes a **Download as PDF** button. All S3 asset URLs are ren
 
 ### Why "Partially Complete"?
 
-A course is marked `WARN / Partially Complete` when items exist that the pipeline cannot resolve automatically. The two known cases are:
+A course is marked `WARN / Partially Complete` when items exist that the pipeline cannot resolve automatically. Known cases:
 
 1. **Respondus LockDown Browser quizzes** — Canvas does not export quiz questions for proctored exams. The quiz shell is imported but questions must be entered manually in the target LMS.
-2. **Missing course thumbnail** — Canvas exports do not include a cover image. One must be provided by the course author.
+2. **Missing course thumbnail** — Neither Canvas nor Blackboard exports include a cover image. One must be provided by the course author.
 
 Everything else is resolved automatically by the pipeline.
 
@@ -213,17 +247,19 @@ Everything else is resolved automatically by the pipeline.
 
 ## Pre-Ingestion Audit Report
 
-Before ingesting, run the audit script to check the health of source files:
+Before ingesting, run the audit script to check the health of source files.  
+The report **auto-detects Canvas vs Blackboard** packages and applies the correct structural checks for each.
 
 ```bash
 # Audit all courses in the default uploads folder
 python scripts/generate_ingestion_report.py
 
-# Audit a specific program folder
-python scripts/generate_ingestion_report.py --root "storage/uploads/BS Information Technology"
+# Audit a specific institution folder
+python scripts/generate_ingestion_report.py --root "storage/uploads/WBU"
+python scripts/generate_ingestion_report.py --root "storage/uploads/SFC/BS Information Technology"
 
 # Audit a single course
-python scripts/generate_ingestion_report.py --course "IT-1104 Programming I"
+python scripts/generate_ingestion_report.py --course "phd-course-shell"
 
 # Skip HTML output
 python scripts/generate_ingestion_report.py --no-html
@@ -237,6 +273,8 @@ python scripts/generate_ingestion_report.py --no-html
 | `--no-html` | `false` | Skip HTML report generation |
 
 The report covers asset-level status (pass / fail / retry), module structure from `imsmanifest.xml`, missing PPTX thumbnails, and structural gaps.
+
+> **Note for Blackboard packages:** The `csfiles/` directory (Blackboard's internal embedded-content store) is automatically excluded from asset scanning. Canvas-specific structural checks (`course_settings/`) are skipped for Blackboard exports.
 
 ---
 
@@ -269,9 +307,9 @@ Every ingestion runs through 5 sequential stages:
 
 | Stage | Progress | Description |
 |---|---|---|
-| **1. Extract** | 10% | Unzip or load the Canvas export directory |
-| **2. Parse** | 30% | Run all parsers: manifest, pages (XML + HTML), assignments, quizzes (QTI), discussions, weblinks, PPTX, orphaned content |
-| **3. Transform** | 50% | Map Canvas models to LMS curriculum schema; auto-detect course code and department from title |
+| **1. Extract** | 10% | Unzip or load the course export directory; auto-detect Canvas vs Blackboard format |
+| **2. Parse** | 30% | Canvas: manifest, pages, assignments, quizzes (QTI), discussions, weblinks, PPTX, orphaned content. Blackboard: `.dat` resource files, BB QTI assessments, discussion forums, Ultra document bodies |
+| **3. Transform** | 50% | Map source models to LMS curriculum schema; auto-detect course code and department from title or BB course ID |
 | **4. Upload Assets** | 70% | Upload all files (PDFs, PPTXs, DOCXs, IPYNBs, CSVs, images, videos) to S3; rewrite HTML URLs to CDN; attach files to correct curriculum items |
 | **5. Export & Validate** | 90–100% | Upsert course to MongoDB; auto-run post-ingestion validation report |
 
@@ -279,7 +317,7 @@ Every ingestion runs through 5 sequential stages:
 
 ## Content Mapping
 
-How Canvas content types map to the LMS schema:
+### Canvas IMS-CC
 
 | Canvas Source | LMS Type | Notes |
 |---|---|---|
@@ -293,18 +331,28 @@ How Canvas content types map to the LMS schema:
 | `imswl` web link | Lesson | External URL rendered as a clickable link |
 | Respondus LockDown Browser quiz | Quiz (shell) | Shell imported; questions require manual entry — see Manual Tasks in report |
 
+### Blackboard Learn Ultra
+
+| Blackboard Source | LMS Type | Notes |
+|---|---|---|
+| `resource/x-bb-document` (Ultra body) | Lesson | HTML body unescaped and cleaned from `.dat` file |
+| `assessment/x-bb-qti-test` | Quiz | Questions parsed from BB QTI `.dat` file |
+| `resource/x-bb-discussionboard` | Discussion | Forum prompt extracted from `<DESCRIPTION>` or `<MESSAGETHREADS>` |
+| `resource/x-bb-announcement` | Lesson | Announcement body imported as HTML |
+| `resource/x-bb-link` | Lesson | External URL rendered as a clickable link |
+| `course/x-bb-coursetoc` folder | Module | Week/unit containers become curriculum modules |
+
 ---
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/migrate` | Ingest a Canvas ZIP upload |
-| `POST` | `/migrate-s3` | Ingest a ZIP from S3 by key |
-| `POST` | `/migrate-canvas` | Ingest via Canvas API course ID |
-| `POST` | `/migrate/hierarchical` | Ingest via DynamoDB metadata lookup |
-| `GET` | `/status/{task_id}` | Poll ingestion job status and progress logs |
-| `GET` | `/health` | Health check |
+| `POST` | `/api/v1/migrate` | Ingest a course ZIP upload |
+| `POST` | `/api/v1/migrate-s3` | Ingest a ZIP from S3 by key |
+| `POST` | `/api/v1/migrate-canvas` | Ingest via Canvas API course ID |
+| `GET` | `/api/v1/status/{job_id}` | Poll ingestion job status and progress |
+| `GET` | `/api/v1/health` | Health check |
 | `GET` | `/docs` | Swagger UI |
 
 ---

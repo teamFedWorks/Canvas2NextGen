@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 EduvateHub Course Onboarding - Unified Entry Point
 
@@ -60,6 +60,7 @@ Examples:
     s3_parser.add_argument("--course", help="Limit to one course code prefix")
     s3_parser.add_argument("--uni", help="MongoDB university ID override")
     s3_parser.add_argument("--author", help="MongoDB author ID override")
+    s3_parser.add_argument("--workers", type=int, default=4, help="Parallel worker threads (default: 4)")
     s3_parser.add_argument("--force", action="store_true", help="Force re-import")
     s3_parser.add_argument("--dry-run", action="store_true", help="List packages without ingesting")
 
@@ -73,6 +74,7 @@ Examples:
     # Ingest Batch
     batch_parser = ingest_subparsers.add_parser("batch", help="Batch ingest courses from local uploads folder")
     batch_parser.add_argument("--uploads", default=str(ROOT / "storage" / "uploads"), help="Uploads root path")
+    batch_parser.add_argument("--institution", default=None, help="Institution code (e.g. WBU, SFC). Auto-detected from DEFAULT_UNIVERSITY_ID when omitted.")
     batch_parser.add_argument("--force", action="store_true", help="Force re-import")
     batch_parser.add_argument("--dry-run", action="store_true", help="List packages without ingesting")
 
@@ -106,12 +108,11 @@ Examples:
             if args.source == "zip":
                 commands.ingest_zip(args.path, args.uni, args.author, args.institution, args.force)
             elif args.source == "s3":
-                commands.ingest_s3(args.institution, args.program, args.course, args.uni, args.author, args.force, args.dry_run)
+                commands.ingest_s3(args.institution, args.program, args.course, args.uni, args.author, args.force, args.dry_run, args.workers)
             elif args.source == "canvas":
                 commands.ingest_canvas(args.course_id, args.uni, args.author, args.force)
             elif args.source == "batch":
-                commands.ingest_batch(args.uploads, args.force, args.dry_run)
-        
+                commands.ingest_batch(args.uploads, args.force, args.dry_run, institution=args.institution)
         elif args.command == "validate":
             commands.validate_course(args.course_id, args.slug, args.strict)
         

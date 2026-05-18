@@ -68,7 +68,7 @@ class IngestionWorker:
             university_id = payload.get("university_id", self.default_uni)
             author_id = payload.get("author_id", self.default_author)
             force = payload.get("force", False)
-            institution = payload.get("institution", "SFC")   # e.g. "SFC" or "WBU"
+            institution = payload.get("institution", "")
 
             # Use provided program_name or derive it
             program_name = payload.get("program_name") or self._discover_program_name(canvas_course)
@@ -122,13 +122,13 @@ class IngestionWorker:
         author_id, 
         task_id, 
         on_progress,
-        institution: str = "SFC",
+        institution: str = "",
     ) -> Dict[str, Any]:
         """
         Runs the standard transformation and export pipeline.
         """
         # 1. Transform
-        if on_progress: on_progress("transforming", 40, "Mapping to EduvateHub schema...")
+        if on_progress: on_progress("transforming", 35, "Mapping to EduvateHub schema...")
         transformer = CourseTransformer()
         # For Blackboard exports the real course code lives in the BB course ID
         # (e.g. MGMT5306SPRING1ST8WKS2026VC01 → MGMT-5306), not the title.
@@ -141,7 +141,14 @@ class IngestionWorker:
             department=self._extract_department(code_source)
         )
 
-        # 2. Asset Migration
+        # 2. Semantic Enrichment (bridges the bifurcation gap)
+        # Runs the same intelligence as CanonicalPipeline/ContentEnricher
+        # on the production LmsCourse so semantic metadata survives to MongoDB.
+        if on_progress: on_progress("enriching", 55, "Applying semantic enrichment...")
+        from core.enrichment import LmsCourseEnricher
+        LmsCourseEnricher().enrich(transformed_course)
+
+        # 3. Asset Migration
         if on_progress: on_progress("uploading_assets", 70, "Migrating assets to S3...")
         
         # If it's a zip source, we have a source_dir. If it's API, we might have remote URLs.
@@ -156,7 +163,7 @@ class IngestionWorker:
         )
         uploader.process_course_assets(transformed_course, canvas_course)
 
-        # 3. Final Export
+        # 4. Final Export
         if on_progress: on_progress("exporting", 90, "Saving to MongoDB...")
         
         from dataclasses import asdict

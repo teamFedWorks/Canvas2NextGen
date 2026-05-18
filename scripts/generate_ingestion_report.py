@@ -50,12 +50,18 @@ NS = {
     "imsmd": "http://ltsc.ieee.org/xsd/imsccv1p1/LOM/manifest",
 }
 
-REQUIRED_DIRS  = ["course_settings"]
-REQUIRED_FILES = ["imsmanifest.xml", "course_settings/course_settings.xml"]
+# Canvas IMS-CC only — not checked for Blackboard packages
+CANVAS_REQUIRED_DIRS  = ["course_settings"]
+CANVAS_REQUIRED_FILES = ["imsmanifest.xml", "course_settings/course_settings.xml"]
 MIN_MODULE_COUNT = 2
 
 # Directories to always exclude from asset scanning (pipeline output, not source)
-EXCLUDE_DIRS = {"tutor_lms_output", ".git", "__pycache__", "lms_output"}
+# csfiles/ is Blackboard's internal embedded-content store — not real course assets
+# ppg/     is Blackboard's question pool generator (Cognero, Respondus, Pearson test banks)
+EXCLUDE_DIRS = {"tutor_lms_output", ".git", "__pycache__", "lms_output", "csfiles", "ppg"}
+
+# Blackboard internal TOC container names — not real week modules
+_BB_INTERNAL_TOC = {"ROOT", "INTERACTIVE", "INDIRECT", "--TOP--"}
 
 # ---------------------------------------------------------------------------
 # Asset helpers
@@ -172,20 +178,41 @@ def _find_course_root(course_dir: Path) -> tuple[Path, Optional[str]]:
 # Manifest / deck parsing  (only reads the top-level manifest)
 # ---------------------------------------------------------------------------
 
+def _is_blackboard_package(course_dir: Path) -> bool:
+    """
+    Return True if the directory is a Blackboard export.
+    Detection: imsmanifest.xml uses the bb: namespace, or .bb-package-info exists.
+    """
+    if (course_dir / ".bb-package-info").exists():
+        return True
+    manifest = course_dir / "imsmanifest.xml"
+    if manifest.exists():
+        try:
+            with open(manifest, "r", encoding="utf-8", errors="replace") as f:
+                head = f.read(512)
+            return "blackboard.com/content-packaging" in head or 'bb:file=' in head
+        except OSError:
+            pass
+    return False
+
+
 def _parse_manifest(course_dir: Path) -> Dict[str, Any]:
     manifest_path = course_dir / "imsmanifest.xml"
     if not manifest_path.exists():
-        return {"modules": [], "deck_count": 0, "parse_error": "imsmanifest.xml not found"}
+        return {"modules": [], "deck_count": 0, "parse_error": "imsmanifest.xml not found",
+                "is_blackboard": False}
 
     try:
         tree = ET.parse(manifest_path)
         root = tree.getroot()
     except ET.ParseError as exc:
-        return {"modules": [], "deck_count": 0, "parse_error": f"XML parse error: {exc}"}
+        return {"modules": [], "deck_count": 0, "parse_error": f"XML parse error: {exc}",
+                "is_blackboard": False}
 
     def _tag(el: ET.Element) -> str:
         return el.tag.split("}")[-1] if "}" in el.tag else el.tag
 
+    is_bb = _is_blackboard_package(course_dir)
     modules: List[Dict[str, Any]] = []
 
     for orgs in root.iter():
@@ -199,6 +226,57 @@ def _parse_manifest(course_dir: Path) -> Dict[str, Any]:
                     continue
                 title_el = next((c for c in item if _tag(c) == "title"), None)
                 title = (title_el.text or "").strip() if title_el is not None else item.get("identifier", "Untitled")
+
+                if is_bb:
+                    # Blackboard: ROOT wraps everything; INTERACTIVE/INDIRECT are
+                    # internal TOC containers. Unwrap ROOT → --TOP-- → real modules.
+                    if title in _BB_INTERNAL_TOC:
+                        # Recurse into children to find real week modules
+                        for child in item:
+                            if _tag(child) != "item":
+                                continue
+                            child_title_el = next((c for c in child if _tag(c) == "title"), None)
+                            child_title = (child_title_el.text or "").strip() if child_title_el is not None else ""
+                            if child_title in _BB_INTERNAL_TOC:
+                                # One more level (--TOP-- inside ROOT)
+                                for grandchild in child:
+                                    if _tag(grandchild) != "item":
+                                        continue
+                                    gc_title_el = next((c for c in grandchild if _tag(c) == "title"), None)
+                                    gc_title = (gc_title_el.text or "").strip() if gc_title_el is not None else ""
+                                    if gc_title in _BB_INTERNAL_TOC:
+                                        continue
+                                    sub_items = [
+                                        {
+                                            "identifier": s.get("identifier", ""),
+                                            "title": ((next((c for c in s if _tag(c) == "title"), None) or ET.Element("x")).text or "").strip(),
+                                            "identifierref": s.get("identifierref", ""),
+                                        }
+                                        for s in grandchild if _tag(s) == "item"
+                                    ]
+                                    modules.append({
+                                        "identifier": grandchild.get("identifier", ""),
+                                        "title": gc_title,
+                                        "items": sub_items,
+                                        "item_count": len(sub_items),
+                                    })
+                            else:
+                                sub_items = [
+                                    {
+                                        "identifier": s.get("identifier", ""),
+                                        "title": ((next((c for c in s if _tag(c) == "title"), None) or ET.Element("x")).text or "").strip(),
+                                        "identifierref": s.get("identifierref", ""),
+                                    }
+                                    for s in child if _tag(s) == "item"
+                                ]
+                                modules.append({
+                                    "identifier": child.get("identifier", ""),
+                                    "title": child_title,
+                                    "items": sub_items,
+                                    "item_count": len(sub_items),
+                                })
+                        continue  # skip adding the ROOT/INTERACTIVE/INDIRECT item itself
+
                 sub_items = [
                     {
                         "identifier": sub.get("identifier", ""),
@@ -214,7 +292,8 @@ def _parse_manifest(course_dir: Path) -> Dict[str, Any]:
                     "item_count": len(sub_items),
                 })
 
-    return {"modules": modules, "deck_count": len(modules), "parse_error": None}
+    return {"modules": modules, "deck_count": len(modules), "parse_error": None,
+            "is_blackboard": is_bb}
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +382,7 @@ def analyze_course(course_dir: Path) -> Dict[str, Any]:
 
     # Manifest / deck info (always from true_root)
     manifest_info = _parse_manifest(true_root)
+    is_bb = manifest_info.get("is_blackboard", False)
 
     deck_statuses: List[Dict[str, Any]] = [
         {
@@ -323,13 +403,15 @@ def analyze_course(course_dir: Path) -> Dict[str, Any]:
     if manifest_info["parse_error"]:
         gaps.append(f"Manifest error: {manifest_info['parse_error']}")
 
-    for req_dir in REQUIRED_DIRS:
-        if not (true_root / req_dir).is_dir():
-            gaps.append(f"Missing required directory: {req_dir}")
+    # Canvas IMS-CC structural checks — skip for Blackboard packages
+    if not is_bb:
+        for req_dir in CANVAS_REQUIRED_DIRS:
+            if not (true_root / req_dir).is_dir():
+                gaps.append(f"Missing required directory: {req_dir}")
 
-    for req_file in REQUIRED_FILES:
-        if not (true_root / req_file).exists():
-            gaps.append(f"Missing required file: {req_file}")
+        for req_file in CANVAS_REQUIRED_FILES:
+            if not (true_root / req_file).exists():
+                gaps.append(f"Missing required file: {req_file}")
 
     deck_count = manifest_info["deck_count"]
     if deck_count == 0:
@@ -337,6 +419,13 @@ def analyze_course(course_dir: Path) -> Dict[str, Any]:
 
     for mod in manifest_info["modules"]:
         if mod["item_count"] == 0:
+            # For Blackboard packages, the INTERACTIVE/INDIRECT TOC containers
+            # duplicate discussions that already appear under week modules.
+            # These are structural artefacts — not real content gaps.
+            if is_bb and mod["title"] in {"INTRODUCTIONS", "D1: Response", "D1: Replies",
+                                           "D2: Response", "D2: Replies", "Required First Assignment",
+                                           "WBU eTextbook Access"}:
+                continue
             gaps.append(f"Empty module (no items): '{mod['title']}'")
 
     total_assets = sum(assets[k]["total"] for k in assets)
@@ -347,6 +436,7 @@ def analyze_course(course_dir: Path) -> Dict[str, Any]:
 
     return {
         "name": course_name,
+        "lms_type": "blackboard" if is_bb else "canvas",
         "true_root": str(true_root.relative_to(course_dir)) if true_root != course_dir else ".",
         "assets": assets,
         "deck_statuses": deck_statuses,
@@ -602,6 +692,8 @@ def generate_html(report: Dict[str, Any]) -> str:
             {status_label}
           </div>
           <div class="course-meta">
+            LMS: <strong>{"Blackboard" if course.get("lms_type") == "blackboard" else "Canvas IMS-CC"}</strong>
+            &nbsp;&nbsp;|&nbsp;&nbsp;
             Total files: <strong>{course['total_assets']}</strong>
             &nbsp;&nbsp;|&nbsp;&nbsp;
             Modules in manifest: <strong>{course['deck_count']}</strong>

@@ -2,7 +2,7 @@
 Custom LMS Domain Models (MERN-Aligned)
 
 Typed dataclasses for the custom MERN-based LMS MongoDB schema.
-Aligned with the required JSON structure provided by the user.
+Aligned with the required JSON structure .
 """
 
 from dataclasses import dataclass, field
@@ -160,6 +160,35 @@ class LmsCurriculumItem:
     # Stored inline under the course document (Phase 1 fix).
     questions: List[LmsQuestion] = field(default_factory=list)
 
+    # ── Semantic enrichment fields ────────────────────────────────────────────
+    # Populated by LmsCourseEnricher after CourseTransformer runs.
+    # These survive persistence and are surfaced in validation reports.
+    #
+    # instructionalType: finer-grained role within the canonical type.
+    #   e.g. "lecture_notes", "coding_walkthrough", "graded_notebook",
+    #        "dataset", "practice_exercise", "policy_document"
+    #
+    # interactionLevel: how actively the learner engages.
+    #   "passive"  — read/watch only (PDFs, slides, videos)
+    #   "active"   — requires input (quizzes, assignments, discussions)
+    #   "hands_on" — executable / lab work (notebooks, coding exercises)
+    #
+    # estimatedDuration: rough reading/completion time in minutes.
+    #   Derived from content length and asset type heuristics.
+    #
+    # learningOutcomes: free-text outcomes inferred from title + content.
+    #   Populated by keyword extraction; empty until AI enrichment is added.
+    #
+    # classificationConfidence: 0.0–1.0 score for the type assignment.
+    #   1.0 = structurally certain (e.g. Quiz from QTI)
+    #   0.7–0.9 = title-keyword match
+    #   0.5–0.7 = heuristic / fallback
+    instructionalType: Optional[str] = None
+    interactionLevel: Optional[str] = None       # "passive" | "active" | "hands_on"
+    estimatedDuration: Optional[int] = None      # minutes
+    learningOutcomes: List[str] = field(default_factory=list)
+    classificationConfidence: float = 1.0
+
     # Traceability (not in target JSON but kept for internal use)
     _canvasId: Optional[str] = field(default=None, metadata={"export": False})
     _content_ref: Optional[str] = field(default=None, metadata={"export": False})
@@ -215,7 +244,7 @@ class LmsCourse:
     language: str = "English"
     
     # Authorship
-    authorName: str = "Admin SFC"
+    authorName: str = "Admin"
     
     # Financials
     pricing: LmsPricing = field(default_factory=LmsPricing)
