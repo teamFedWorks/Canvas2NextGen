@@ -343,17 +343,18 @@ class LmsCourseEnricher:
 
     # ── Type → interaction level ──────────────────────────────────────────
     _INTERACTION: Dict[str, str] = {
-        "Quiz":        "active",
-        "Assignment":  "active",
-        "Discussion":  "active",
-        "Survey":      "active",
-        "Lesson":      "passive",
-        "Reading":     "passive",
-        "LiveSession": "passive",
-        "Announcement":"passive",
-        "Policy":      "passive",
-        "Resource":    "passive",
-        "ExternalTool":"active",
+        "Quiz":           "active",
+        "Assignment":     "active",
+        "Discussion":     "active",
+        "Survey":         "active",
+        "Lesson":         "passive",
+        "Reading":        "passive",
+        "LiveSession":    "passive",
+        "Announcement":   "passive",
+        "Policy":         "passive",
+        "Resource":       "passive",
+        "ExternalTool":   "active",
+        "instructor_bio": "passive",  # bio / about-me pages are read-only
     }
 
     # ── Words per minute reading speed (conservative) ────────────────────
@@ -402,12 +403,21 @@ class LmsCourseEnricher:
 
             # ── Weekly guides / instructions ──────────────────────────────
             # "WK 1 Instructions", "Week 2 Instructions", "Module 3 Overview"
+            # "Module 1 Activities and Assessments", "Module 2 Interactions"
             (r"^wk\s*\d+\s+instructions?\s*$",
              "Lesson", "weekly_guide", 0.95),
             (r"^week\s*\d+\s+instructions?\s*$",
              "Lesson", "weekly_guide", 0.95),
-            (r"^module\s*\d+\s+(overview|instructions?|guide)\s*$",
+            (r"^module\s*\d+\s+(overview|instructions?|guide|objectives?|activities?(\ and\ assessments?)?|assessments?|interactions?)\s*$",
              "Lesson", "weekly_guide", 0.90),
+            # "Module N Course Content - Readings and Lectures"
+            (r"^module\s*\d+\s+course\s+content",
+             "Lesson", "weekly_guide", 0.90),
+
+            # ── Instructor / facilitator bio pages ────────────────────────
+            # "About me ... your learning facilitator", "Meet your professor"
+            (r"(about\s+me|your\s+(instructor|professor|facilitator|learning\s+facilitator)|meet\s+(your|the)\s+(instructor|professor|facilitator))",
+             "Lesson", "instructor_bio", 0.90),
 
             # ── Learning outcomes / objectives pages ──────────────────────
             (r"^learning\s+outcomes?\s*$",
@@ -708,6 +718,13 @@ class LmsCourseEnricher:
             if words >= 50:
                 return "Lesson", 0.65
 
+        # ── Attachment-based floor boost ──────────────────────────────────
+        # An item that has files attached but no strong title/body signal is
+        # still more likely to be a real content item than a bare placeholder.
+        # Raise the minimum confidence from 55% → 65%.
+        if item.attachments:
+            return "Lesson", 0.65
+
         return "Lesson", 0.55
 
     def _instructional_type(self, title_lower: str, item_type: str) -> str:
@@ -751,8 +768,13 @@ class LmsCourseEnricher:
             # How-to guides
             (["uploading", "how to", "instructions", "guide",
               "steps for"],                                      "how_to_guide"),
+            # Instructor bio
+            (["about me", "your instructor", "your professor",
+              "your facilitator", "your learning facilitator",
+              "meet your", "meet the instructor"],               "instructor_bio"),
             # Weekly guides
-            (["wk ", "week ", "module ", "weekly"],              "weekly_guide"),
+            (["wk ", "week ", "module ", "weekly",
+              "activities", "interactions", "assessments"],     "weekly_guide"),
             # Learning outcomes
             (["learning outcomes", "learning objectives",
               "course outcomes"],                                "learning_outcomes"),
