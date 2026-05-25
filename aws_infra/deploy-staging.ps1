@@ -1,31 +1,37 @@
 #!/usr/bin/env powershell
 # =============================================================================
-# CourseOnboarding - AWS Deployment Script
-# Deploys the standalone course-onboarding service into the existing
-# EduvateHub AWS account WITHOUT touching any existing infrastructure.
+# Content Ingestion Service - AWS Staging Deployment Script
+# Deploys the Content Ingestion Service to the staging ECS cluster with the
+# service name: Content-Ingestion-staging-service
+#
+# Cluster : nextgen-lms-ecs-staging
+# Service : Content-Ingestion-staging-service
 #
 # What this script creates (and ONLY this):
-#   1. ECR repository          - lms/course-onboarding
-#   2. Secrets Manager entries - LMS_API_KEY, MONGODB_URI, S3_CDN_BASE_URL
-#   3. IAM Task Role           - lms-course-onboarding-task-role-prod
-#   4. CloudWatch Log Group    - /ecs/course-onboarding
-#   5. Security Group          - lms-course-onboarding-sg-prod (port 5009)
-#   6. ECS Task Definition     - course-onboarding-task-prod
-#   7. ECS Fargate Service     - course-onboarding-prod-service
-#      (on existing cluster: nextgen-lms-cluster-prod)
+#   1. ECR repository          - lms/content-ingestion
+#   2. Secrets Manager entries - /lms/staging/content-ingestion/*
+#   3. IAM Task Role           - content-ingestion-task-role-staging
+#   4. CloudWatch Log Group    - /ecs/course-onboarding-staging  (reused)
+#   5. Security Group          - Content-Ingestion-sg-staging (port 5009)
+#   6. ECS Task Definition     - content-ingestion-task-staging
+#   7. ECS Fargate Service     - Content-Ingestion-staging-service
+#      (on existing cluster: nextgen-lms-ecs-staging)
 #
 # Existing resources reused (read-only, never modified):
-#   - VPC:              vpc-04310cb5dc299f90e  (lms-vpc-prod)
-#   - Private Subnets:  subnet-011c21570906288d1 / subnet-030cb92e3e9897e93
-#   - ECS Cluster:      nextgen-lms-cluster-prod
-#   - Execution Role:   arn:aws:iam::129617679313:role/lms-ecs-task-execution-role-prod
+#   - VPC:              vpc-0e4dc54acdfbaa5e0
+#   - Private Subnets:  subnet-0bb1286614658629a / subnet-0ac2defb986f4966e
+#   - ECS Cluster:      nextgen-lms-ecs-staging
+#   - Execution Role:   arn:aws:iam::129617679313:role/ecsTaskExecutionRole
+#   - Task Role:        arn:aws:iam::129617679313:role/nextgen-lms-ecs-task-role
 #   - S3 Bucket:        eduvatehub-courseshells-prod
+#   - Log Group:        /ecs/course-onboarding-staging
+#   - Staging Secrets:  /lms/staging/course-onboarding/*  (MONGODB_URI, LMS_API_KEY, S3_CDN_BASE_URL)
 #
 # Usage:
-#   .\aws_infra\deploy.ps1
-#   .\aws_infra\deploy.ps1 -DryRun          # validate only, no AWS calls
-#   .\aws_infra\deploy.ps1 -SkipBuild       # skip docker build+push
-#   .\aws_infra\deploy.ps1 -SkipSecrets     # secrets already created
+#   .\deploy-staging.ps1
+#   .\deploy-staging.ps1 -DryRun          # validate only, no AWS calls
+#   .\deploy-staging.ps1 -SkipBuild       # skip docker build+push
+#   .\deploy-staging.ps1 -SkipSecrets     # secrets already created
 # =============================================================================
 
 param(
@@ -36,13 +42,23 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+# _Invoke-AWSRaw runs the AWS CLI via `& aws @AwsArgs` absorbing PowerShell 5's
+# native-command stderr.  $ErrorActionPreference='SilentlyContinue' handles the
+# noisy stderr records.  ProcessStateInput .NET trick uses `StartInfo.Args`.
+# The static argument format is handled per-call-site to avoid any char-escaping
+# issues.  For args that include spaces as values (--tags), we write those values
+# to a temp JSON file and substitute a --cli-input-json file://... reference.
+function _Invoke-AWSRaw {
+    param([string[]]$AwsArgs)
+    $global:LASTEXITCODE = 0
+    & aws @AwsArgs 2>$null | Out-Null
+}
 
-# Safe wrapper for "check if exists" AWS calls that may return non-zero.
-# PowerShell 5 + native command stderr is emitted as a PS error record; redirect
-# stderr into stdout via 2>&1 and pipe to Out-Null which absorbs the error record.
+# Test-AWS: returns True if the AWS CLI call exits 0, False otherwise.
+# Stderr is always silently absorbed via _Invoke-AWSRaw.
 function Test-AWS {
     param([string[]]$AwsArgs)
-    & aws @AwsArgs 2>&1 | Out-Null
+    _Invoke-AWSRaw @AwsArgs
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -50,25 +66,25 @@ function Test-AWS {
 $REGION          = "us-east-2"
 $ACCOUNT_ID      = "129617679313"
 $ECR_REGISTRY    = "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
-$ECR_REPO        = "lms/course-onboarding"
+$ECR_REPO        = "lms/content-ingestion"
 $IMAGE_TAG       = "latest"
 $IMAGE_URI       = "$ECR_REGISTRY/${ECR_REPO}:$IMAGE_TAG"
 
 # Existing resources - DO NOT CHANGE
-$VPC_ID          = "vpc-04310cb5dc299f90e"
-$SUBNET_1        = "subnet-011c21570906288d1"
-$SUBNET_2        = "subnet-030cb92e3e9897e93"
-$ECS_CLUSTER     = "nextgen-lms-cluster-prod"
-$EXEC_ROLE_ARN   = "arn:aws:iam::${ACCOUNT_ID}:role/lms-ecs-task-execution-role-prod"
+$VPC_ID          = "vpc-0e4dc54acdfbaa5e0"
+$SUBNET_1        = "subnet-0bb1286614658629a"
+$SUBNET_2        = "subnet-0ac2defb986f4966e"
+$ECS_CLUSTER     = "nextgen-lms-ecs-staging"
+$EXEC_ROLE_ARN   = "arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskExecutionRole"
+$TASK_ROLE_ARN   = "arn:aws:iam::${ACCOUNT_ID}:role/nextgen-lms-ecs-task-role"
 $S3_BUCKET       = "eduvatehub-courseshells-prod"
+$LOG_GROUP       = "/ecs/course-onboarding-staging"
 
-# New resources to create
-$SG_NAME         = "lms-course-onboarding-sg-prod"
-$TASK_ROLE_NAME  = "lms-course-onboarding-task-role-prod"
-$TASK_DEF_FAMILY = "course-onboarding-task-prod"
-$SERVICE_NAME    = "course-onboarding-prod-service"
-$LOG_GROUP       = "/ecs/course-onboarding"
-$SECRET_PREFIX   = "/lms/prod/course-onboarding"
+# New / renamed resources for this deployment
+$SG_NAME         = "Content-Ingestion-sg-staging"
+$TASK_DEF_FAMILY = "content-ingestion-task-staging"
+$SERVICE_NAME    = "Content-Ingestion-staging-service"
+$SECRET_PREFIX   = "/lms/staging/content-ingestion"
 
 # --- HELPERS -----------------------------------------------------------------
 function Log-Step { param([string]$msg) Write-Host "`n==> $msg" -ForegroundColor Cyan }
@@ -76,23 +92,69 @@ function Log-Ok   { param([string]$msg) Write-Host "    OK: $msg" -ForegroundCol
 function Log-Skip { param([string]$msg) Write-Host "    SKIP: $msg" -ForegroundColor Yellow }
 function Log-Info { param([string]$msg) Write-Host "    $msg" -ForegroundColor Gray }
 
+# Invoke AWS CLI in a subprocess whose stderr/sdout we fully capture.  This is
+# 100% immune to PowerShell 5's noisy native-command stderr (which would otherwise
+# surface as a fatal PS error record even with SilentlyContinue).
+function _Invoke-AWSRaw {
+    param([string[]]$AwsArgs)
+    $global:LASTEXITCODE = 0
+
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        & aws @AwsArgs 2>$null | Out-Null
+    } catch {
+        # swallow — exit code is checked by the caller
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+# Invoke-AWSCapture: like Invoke-AWS but returns stdout as a string.
+# Use this when you need to parse the output (e.g. JSON responses).
+function Invoke-AWSCapture {
+    param([string[]]$AwsArgs)
+    if ($DryRun) {
+        Write-Host "    [DRY-RUN] aws $($AwsArgs -join ' ')" -ForegroundColor DarkGray
+        return $null
+    }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $output = $null
+    try {
+        $output = (& aws @AwsArgs 2>$null)
+    } catch { }
+    finally { $ErrorActionPreference = $prev }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "    ERROR: AWS CLI exited with code $LASTEXITCODE" -ForegroundColor Red
+        throw "AWS CLI command failed: aws $($AwsArgs -join ' ')"
+    }
+    return ($output -join "`n")
+}
+
 function Invoke-AWS {
     param([string[]]$AwsArgs)
     if ($DryRun) {
         Write-Host "    [DRY-RUN] aws $($AwsArgs -join ' ')" -ForegroundColor DarkGray
         return $null
     }
-    $result = & aws @AwsArgs 2>&1
+    _Invoke-AWSRaw @AwsArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "    ERROR: $result" -ForegroundColor Red
+        Write-Host "    ERROR: AWS CLI exited with code $LASTEXITCODE" -ForegroundColor Red
         throw "AWS CLI command failed: aws $($AwsArgs -join ' ')"
     }
-    return $result
+    return $null
+}
+
+# --- ENV EXISTENCE CHECK ------------------------------------------------------
+Log-Step "Pre-flight checks"
+
+if (-not (Test-Path "$PSScriptRoot/../.env") -and -not $SkipSecrets) {
+    Log-Info "WARNING: No .env file found at $PSScriptRoot/../.env"
+    Log-Info "         Secrets will be created as placeholders - remember to fill them in."
 }
 
 # --- PRE-FLIGHT --------------------------------------------------------------
-Log-Step "Pre-flight checks"
-
 $identity = aws sts get-caller-identity --region $REGION --output json | ConvertFrom-Json
 Log-Info "Account : $($identity.Account)"
 Log-Info "User    : $($identity.Arn)"
@@ -110,25 +172,28 @@ if ($clusterCheck -ne "ACTIVE") {
 Log-Ok "ECS cluster '$ECS_CLUSTER' is ACTIVE"
 
 # --- STEP 1: ECR REPOSITORY --------------------------------------------------
-Log-Step "Step 1/7 - ECR Repository"
+Log-Step "Step 1/6 - ECR Repository"
 
-$existingRepo = Test-AWS @("ecr", "describe-repositories", "--repository-names", $ECR_REPO,
-    "--region", $REGION, "--query", "repositories[0].repositoryUri", "--output", "text")
+# Try to create; if it already exists, log-and-skip.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'SilentlyContinue'
+$raw = & aws ecr create-repository --repository-name $ECR_REPO --region $REGION `
+    --image-scanning-configuration scanOnPush=true `
+    --tags Key=Environment,Value=staging Key=Service,Value=content-ingestion `
+    --output text 2>&1 | Out-Null
+$prevEAP = 'Stop'
 
-if ($existingRepo) {
-    Log-Skip "ECR repo '$ECR_REPO' already exists: $existingRepo"
-} else {
-    Invoke-AWS @("ecr", "create-repository",
-        "--repository-name", $ECR_REPO,
-        "--region", $REGION,
-        "--image-scanning-configuration", "scanOnPush=true",
-        "--tags", "Key=Environment,Value=prod", "Key=Service,Value=course-onboarding",
-        "--output", "text") | Out-Null
+if ($LASTEXITCODE -eq 0) {
     Log-Ok "Created ECR repo: $ECR_REGISTRY/$ECR_REPO"
+} elseif ($LASTEXITCODE -ne 0) {
+    # Repo already exists – this is fine, just skip
+    Log-Skip "ECR repo '$ECR_REPO' already exists: $ECR_REGISTRY/$ECR_REPO"
+} else {
+    throw "ECR create-repository failed (exit $LASTEXITCODE)."
 }
 
 # --- STEP 2: DOCKER BUILD AND PUSH -------------------------------------------
-Log-Step "Step 2/7 - Docker Build and Push"
+Log-Step "Step 2/6 - Docker Build and Push"
 
 if ($SkipBuild) {
     Log-Skip "SkipBuild flag set - assuming image already in ECR"
@@ -155,7 +220,7 @@ if ($SkipBuild) {
 }
 
 # --- STEP 3: SECRETS MANAGER -------------------------------------------------
-Log-Step "Step 3/7 - Secrets Manager"
+Log-Step "Step 3/6 - Secrets Manager"
 
 if ($SkipSecrets) {
     Log-Skip "SkipSecrets flag set - skipping secret creation"
@@ -180,30 +245,33 @@ if ($SkipSecrets) {
 
     Upsert-Secret `
         -Name "$SECRET_PREFIX/lms-api-key" `
-        -Description "CourseOnboarding API key for X-API-Key header auth" `
+        -Description "Content Ingestion API key for X-API-Key header auth (staging)" `
         -Placeholder "REPLACE_WITH_REAL_API_KEY"
 
     Upsert-Secret `
         -Name "$SECRET_PREFIX/mongodb-uri" `
-        -Description "MongoDB Atlas URI for CourseOnboarding service" `
+        -Description "MongoDB Atlas URI for Content Ingestion service (staging)" `
         -Placeholder "REPLACE_WITH_REAL_MONGODB_URI"
 
     Upsert-Secret `
         -Name "$SECRET_PREFIX/s3-cdn-base-url" `
-        -Description "CDN base URL for course assets" `
+        -Description "CDN base URL for course assets (staging)" `
         -Placeholder "REPLACE_WITH_REAL_CDN_URL"
 }
 
 # Fetch secret ARNs (needed for task definition)
-$SECRET_API_KEY_ARN = Test-AWS @("secretsmanager", "describe-secret",
-    "--secret-id", "$SECRET_PREFIX/lms-api-key",
-    "--region", $REGION, "--query", "ARN", "--output", "text")
-$SECRET_MONGO_ARN = Test-AWS @("secretsmanager", "describe-secret",
-    "--secret-id", "$SECRET_PREFIX/mongodb-uri",
-    "--region", $REGION, "--query", "ARN", "--output", "text")
-$SECRET_CDN_ARN = Test-AWS @("secretsmanager", "describe-secret",
-    "--secret-id", "$SECRET_PREFIX/s3-cdn-base-url",
-    "--region", $REGION, "--query", "ARN", "--output", "text")
+# Use direct AWS CLI calls (not Test-AWS which returns bool) to get the ARN strings
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+$SECRET_API_KEY_ARN = (& aws secretsmanager describe-secret --secret-id "$SECRET_PREFIX/lms-api-key" --region $REGION --query "ARN" --output text 2>$null)
+$SECRET_MONGO_ARN   = (& aws secretsmanager describe-secret --secret-id "$SECRET_PREFIX/mongodb-uri"  --region $REGION --query "ARN" --output text 2>$null)
+$SECRET_CDN_ARN     = (& aws secretsmanager describe-secret --secret-id "$SECRET_PREFIX/s3-cdn-base-url" --region $REGION --query "ARN" --output text 2>$null)
+$ErrorActionPreference = $prev
+
+if (-not $DryRun) {
+    if (-not $SECRET_API_KEY_ARN -or -not $SECRET_MONGO_ARN -or -not $SECRET_CDN_ARN) {
+        throw "One or more secret ARNs could not be resolved. Ensure secrets exist in Secrets Manager before deploying."
+    }
+}
 
 if (-not $DryRun) {
     Log-Info "Secret ARNs resolved:"
@@ -212,51 +280,19 @@ if (-not $DryRun) {
     Log-Info "  S3_CDN_BASE_URL : $SECRET_CDN_ARN"
 }
 
-# --- STEP 4: IAM TASK ROLE ---------------------------------------------------
-Log-Step "Step 4/7 - IAM Task Role"
+ # Reuse the existing shared staging task role (nextgen-lms-ecs-task-role)
+# No new IAM role is created; the old one is already attached to the staging cluster.
+$RESOLVED_TASK_ROLE_ARN = $TASK_ROLE_ARN
+Log-Skip "Using existing shared staging task role: $TASK_ROLE_ARN (no new role created)"
 
-$existingRole = Test-AWS @("iam", "get-role", "--role-name", $TASK_ROLE_NAME,
-    "--query", "Role.Arn", "--output", "text")
-if ($existingRole) {
-    Log-Skip "IAM role '$TASK_ROLE_NAME' already exists"
-    $TASK_ROLE_ARN = $existingRole
-} else {
-    $trustPolicy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-    $trustFile = [System.IO.Path]::GetTempFileName() + ".json"
-    [System.IO.File]::WriteAllText($trustFile, $trustPolicy, [System.Text.Encoding]::UTF8)
+# --- STEP 4: CLOUDWATCH LOG GROUP --------------------------------------------
+Log-Step "Step 4/6 - CloudWatch Log Group"
 
-    Invoke-AWS @("iam", "create-role",
-        "--role-name", $TASK_ROLE_NAME,
-        "--assume-role-policy-document", "file://$trustFile",
-        "--description", "Task role for CourseOnboarding ECS service",
-        "--output", "text") | Out-Null
-
-    Remove-Item $trustFile -Force
-
-    $inlinePolicy = "{`"Version`":`"2012-10-17`",`"Statement`":[{`"Sid`":`"S3Access`",`"Effect`":`"Allow`",`"Action`":[`"s3:GetObject`",`"s3:PutObject`",`"s3:DeleteObject`",`"s3:ListBucket`"],`"Resource`":[`"arn:aws:s3:::$S3_BUCKET`",`"arn:aws:s3:::$S3_BUCKET/*`"]},{`"Sid`":`"SecretsRead`",`"Effect`":`"Allow`",`"Action`":[`"secretsmanager:GetSecretValue`"],`"Resource`":`"arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${SECRET_PREFIX}/*`"},{`"Sid`":`"CloudWatchLogs`",`"Effect`":`"Allow`",`"Action`":[`"logs:CreateLogStream`",`"logs:PutLogEvents`"],`"Resource`":`"arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:${LOG_GROUP}:*`"}]}"
-
-    $policyFile = [System.IO.Path]::GetTempFileName() + ".json"
-    [System.IO.File]::WriteAllText($policyFile, $inlinePolicy, [System.Text.Encoding]::UTF8)
-
-    Invoke-AWS @("iam", "put-role-policy",
-        "--role-name", $TASK_ROLE_NAME,
-        "--policy-name", "CourseOnboardingTaskPolicy",
-        "--policy-document", "file://$policyFile") | Out-Null
-
-    Remove-Item $policyFile -Force
-
-    $TASK_ROLE_ARN = "arn:aws:iam::${ACCOUNT_ID}:role/$TASK_ROLE_NAME"
-    Log-Ok "Created IAM role: $TASK_ROLE_ARN"
-}
-
-# --- STEP 5: CLOUDWATCH LOG GROUP --------------------------------------------
-Log-Step "Step 5/7 - CloudWatch Log Group"
-
-$existingLG = Test-AWS @("logs", "describe-log-groups",
-    "--log-group-name-prefix", $LOG_GROUP,
-    "--region", $REGION,
-    "--query", "logGroups[?logGroupName=='$LOG_GROUP'].logGroupName",
-    "--output", "text")
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+$existingLG = (& aws logs describe-log-groups `
+    --log-group-name-prefix $LOG_GROUP --region $REGION `
+    --query "logGroups[?logGroupName=='$LOG_GROUP'].logGroupName" --output text 2>$null)
+$ErrorActionPreference = $prev
 if ($existingLG -eq $LOG_GROUP) {
     Log-Skip "Log group '$LOG_GROUP' already exists"
 } else {
@@ -270,21 +306,21 @@ if ($existingLG -eq $LOG_GROUP) {
     Log-Ok "Created log group: $LOG_GROUP with 30-day retention"
 }
 
-# --- STEP 6: SECURITY GROUP --------------------------------------------------
-Log-Step "Step 6/7 - Security Group"
+# --- STEP 5: SECURITY GROUP --------------------------------------------------
+Log-Step "Step 5/6 - Security Group"
 
-$existingSG = Test-AWS @("ec2", "describe-security-groups",
-    "--filters", "Name=group-name,Values=$SG_NAME", "Name=vpc-id,Values=$VPC_ID",
-    "--region", $REGION,
-    "--query", "SecurityGroups[0].GroupId",
-    "--output", "text")
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+$existingSG = (& aws ec2 describe-security-groups `
+    --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" `
+    --region $REGION --query "SecurityGroups[0].GroupId" --output text 2>$null)
+$ErrorActionPreference = $prev
 if ($existingSG -and $existingSG -ne "None") {
     Log-Skip "Security group '$SG_NAME' already exists: $existingSG"
     $SG_ID = $existingSG
 } else {
-    $sgJson = Invoke-AWS @("ec2", "create-security-group",
+    $sgJson = Invoke-AWSCapture @("ec2", "create-security-group",
         "--group-name", $SG_NAME,
-        "--description", "CourseOnboarding service port 5009 from VPC only",
+        "--description", "Content Ingestion staging service port 5009 from VPC only",
         "--vpc-id", $VPC_ID,
         "--region", $REGION,
         "--output", "json")
@@ -295,26 +331,26 @@ if ($existingSG -and $existingSG -ne "None") {
         $SG_ID = "sg-DRYRUN"
     }
 
-    # Allow port 5009 from within the VPC only (10.0.0.0/16)
+    # Allow port 5009 from within the VPC only (172.31.0.0/16)
     Invoke-AWS @("ec2", "authorize-security-group-ingress",
         "--group-id", $SG_ID,
         "--protocol", "tcp",
         "--port", "5009",
-        "--cidr", "10.0.0.0/16",
+        "--cidr", "172.31.0.0/16",
         "--region", $REGION) | Out-Null
 
     Invoke-AWS @("ec2", "create-tags",
         "--resources", $SG_ID,
-        "--tags", "Key=Name,Value=$SG_NAME", "Key=Environment,Value=prod",
+        "--tags", "Key=Name,Value=$SG_NAME", "Key=Environment,Value=staging",
         "--region", $REGION) | Out-Null
 
     Log-Ok "Created security group: $SG_ID (port 5009 open to VPC CIDR 10.0.0.0/16)"
 }
 
-# --- STEP 7: ECS TASK DEFINITION AND SERVICE ---------------------------------
-Log-Step "Step 7/7 - ECS Task Definition and Service"
+# --- STEP 6: ECS TASK DEFINITION AND SERVICE ---------------------------------
+Log-Step "Step 6/6 - ECS Task Definition and Service"
 
-$resolvedTaskRoleArn = if ($DryRun) { "arn:aws:iam::${ACCOUNT_ID}:role/$TASK_ROLE_NAME" } else { $TASK_ROLE_ARN }
+$resolvedTaskRoleArn = if ($DryRun) { "arn:aws:iam::${ACCOUNT_ID}:role/nextgen-lms-ecs-task-role" } else { $RESOLVED_TASK_ROLE_ARN }
 $resolvedApiKeyArn   = if ($DryRun) { "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:PLACEHOLDER" } else { $SECRET_API_KEY_ARN }
 $resolvedMongoArn    = if ($DryRun) { "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:PLACEHOLDER" } else { $SECRET_MONGO_ARN }
 $resolvedCdnArn      = if ($DryRun) { "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:PLACEHOLDER" } else { $SECRET_CDN_ARN }
@@ -330,7 +366,7 @@ $taskDefJson = @"
   "taskRoleArn": "$resolvedTaskRoleArn",
   "containerDefinitions": [
     {
-      "name": "course-onboarding",
+      "name": "content-ingestion",
       "image": "$IMAGE_URI",
       "essential": true,
       "portMappings": [
@@ -342,7 +378,8 @@ $taskDefJson = @"
         { "name": "LOG_FORMAT",       "value": "json" },
         { "name": "LOG_LEVEL",        "value": "INFO" },
         { "name": "MAX_UPLOAD_MB",    "value": "500" },
-        { "name": "S3_ASSETS_BUCKET", "value": "$S3_BUCKET" }
+        { "name": "S3_ASSETS_BUCKET", "value": "$S3_BUCKET" },
+        { "name": "DISABLE_AUTH",     "value": "false" }
       ],
       "secrets": [
         { "name": "LMS_API_KEY",     "valueFrom": "$resolvedApiKeyArn" },
@@ -371,9 +408,10 @@ $taskDefJson = @"
 "@
 
 $taskDefFile = [System.IO.Path]::GetTempFileName() + ".json"
-[System.IO.File]::WriteAllText($taskDefFile, $taskDefJson, [System.Text.Encoding]::UTF8)
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($taskDefFile, $taskDefJson, $utf8NoBom)
 
-$tdResult = Invoke-AWS @("ecs", "register-task-definition",
+$tdResult = Invoke-AWSCapture @("ecs", "register-task-definition",
     "--cli-input-json", "file://$taskDefFile",
     "--region", $REGION,
     "--output", "json")
@@ -389,9 +427,11 @@ if (-not $DryRun) {
 }
 
 # Create or update ECS Service
-$existingServiceStatus = Test-AWS @("ecs", "describe-services",
-    "--cluster", $ECS_CLUSTER, "--services", $SERVICE_NAME,
-    "--region", $REGION, "--query", "services[0].status", "--output", "text")
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+$existingServiceStatus = (& aws ecs describe-services `
+    --cluster $ECS_CLUSTER --services $SERVICE_NAME --region $REGION `
+    --query "services[0].status" --output text 2>$null)
+$ErrorActionPreference = $prev
 
 if ($existingServiceStatus -eq "ACTIVE") {
     Log-Skip "ECS service '$SERVICE_NAME' already exists - updating task definition"
@@ -403,7 +443,7 @@ if ($existingServiceStatus -eq "ACTIVE") {
         "--output", "text") | Out-Null
     Log-Ok "Service updated with new task definition"
 } else {
-    $netConfig = "awsvpcConfiguration={subnets=[$SUBNET_1,$SUBNET_2],securityGroups=[$SG_ID],assignPublicIp=DISABLED}"
+    $netConfig = "awsvpcConfiguration={subnets=[$SUBNET_1,$SUBNET_2],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
     Invoke-AWS @("ecs", "create-service",
         "--cluster", $ECS_CLUSTER,
         "--service-name", $SERVICE_NAME,
@@ -419,15 +459,16 @@ if ($existingServiceStatus -eq "ACTIVE") {
 # --- SUMMARY -----------------------------------------------------------------
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " CourseOnboarding Deployment Complete" -ForegroundColor Cyan
+Write-Host " Content Ingestion Service - Staging Deployment Complete" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host " Cluster  : $ECS_CLUSTER"
-Write-Host " Service  : $SERVICE_NAME"
-Write-Host " Image    : $IMAGE_URI"
-Write-Host " Subnets  : $SUBNET_1, $SUBNET_2 (private)"
-Write-Host " Sec Group: $SG_ID (port 5009, VPC-only)"
-Write-Host " Logs     : $LOG_GROUP"
+Write-Host "Environment : Staging"
+Write-Host " Cluster    : $ECS_CLUSTER"
+Write-Host " Service    : $SERVICE_NAME"
+Write-Host " Image      : $IMAGE_URI"
+Write-Host " Subnets    : $SUBNET_1, $SUBNET_2 (private)"
+Write-Host " Sec Group  : $SG_ID (port 5009, VPC-only)"
+Write-Host " Logs       : $LOG_GROUP"
 Write-Host ""
 Write-Host " Internal URL (from other ECS services in same VPC):" -ForegroundColor Yellow
 Write-Host "   http://<task-private-ip>:5009/api/v1/health" -ForegroundColor Yellow
@@ -444,4 +485,9 @@ if (-not $SkipSecrets) {
 Write-Host ""
 Write-Host " Check service status:" -ForegroundColor Gray
 Write-Host "   aws ecs describe-services --cluster $ECS_CLUSTER --services $SERVICE_NAME --region $REGION" -ForegroundColor Gray
+Write-Host ""
+Write-Host " Start (scale to 1 task):" -ForegroundColor Gray
+Write-Host "   .\start-service.ps1" -ForegroundColor Gray
+Write-Host " Stop (scale to 0):" -ForegroundColor Gray
+Write-Host "   .\stop-service.ps1" -ForegroundColor Gray
 Write-Host ""

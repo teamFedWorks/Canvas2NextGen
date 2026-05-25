@@ -1,6 +1,6 @@
 #!/usr/bin/env powershell
 # =============================================================================
-# Content Ingestion Service - Start (Adhoc)
+# Content Ingestion Staging Service - Start (Adhoc)
 #
 # This is an ADHOC service. Start it only when you need to ingest courses.
 # Stop it when ingestion is complete using stop-service.ps1.
@@ -24,7 +24,7 @@ $DISPLAY_NAME = "Content Ingestion Service"
 # Resolve cluster and service name based on environment
 if ($Env -eq "staging") {
     $CLUSTER = "nextgen-lms-ecs-staging"
-    $SERVICE = "course-onboarding-staging-service"
+    $SERVICE = "Content-Ingestion-staging-service"
 } else {
     $CLUSTER = "nextgen-lms-cluster-prod"
     $SERVICE = "course-onboarding-prod-service"
