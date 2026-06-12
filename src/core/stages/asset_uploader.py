@@ -458,6 +458,37 @@ class AssetUploader:
                             if target_item and not any(a.url == s_url for a in target_item.attachments):
                                 target_item.attachments.append(attachment)
                                 
+                                # Extract YuJa or Zoom video URLs from local HTML file if it is an HTML attachment
+                                if local_file.suffix.lower() in ('.html', '.htm') and not getattr(target_item, 'videoUrl', None):
+                                    try:
+                                        with open(local_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                            html_content = f.read()
+                                        from bs4 import BeautifulSoup
+                                        soup = BeautifulSoup(html_content, "html.parser")
+                                        extracted_url = None
+                                        
+                                        # Check for iframes
+                                        for iframe in soup.find_all("iframe", src=True):
+                                            src = iframe["src"]
+                                            if "yuja.com" in src or "zoom.us" in src:
+                                                extracted_url = src
+                                                break
+                                                
+                                        # Check for anchors if no iframe found
+                                        if not extracted_url:
+                                            for anchor in soup.find_all("a", href=True):
+                                                href = anchor["href"]
+                                                if "yuja.com" in href or "zoom.us" in href:
+                                                    extracted_url = href
+                                                    break
+                                                    
+                                        if extracted_url:
+                                            import html as _html
+                                            target_item.videoUrl = _html.unescape(extracted_url)
+                                            logger.info(f"Extracted video URL '{target_item.videoUrl}' from attachment '{local_file.name}' for item '{target_item.title}'")
+                                    except Exception as ex:
+                                        logger.warning(f"Failed to extract video URL from local HTML file {local_file.name}: {ex}")
+                                
                 except Exception as e:
                     logger.error(f"Error processing upload result for {href}: {e}")
         
@@ -652,20 +683,20 @@ class AssetUploader:
             lower_mime = (mime_type or '').lower()
             lower_name = upload_filename.lower()
             if 'pdf' in lower_mime or lower_name.endswith('.pdf'):
-                link.string = f"📄 View PDF: {upload_filename}"
+                link.string = f" View PDF: {upload_filename}"
             elif 'word' in lower_mime or lower_name.endswith(('.doc', '.docx')):
-                link.string = f"📝 Download Word Doc: {upload_filename}"
+                link.string = f" Download Word Doc: {upload_filename}"
             elif 'powerpoint' in lower_mime or lower_name.endswith(('.ppt', '.pptx')):
-                link.string = f"📊 Download Slides: {upload_filename}"
+                link.string = f" Download Slides: {upload_filename}"
             elif 'excel' in lower_mime or lower_name.endswith(('.xls', '.xlsx')):
-                link.string = f"📊 Download Spreadsheet: {upload_filename}"
+                link.string = f" Download Spreadsheet: {upload_filename}"
             else:
-                link.string = f"📎 Download: {upload_filename}"
+                link.string = f" Download: {upload_filename}"
             wrapper.append(link)
 
             if not s3_url:
                 note = soup.new_tag('span', **{'class': 'attachment-note'})
-                note.string = "⚠️ This file could not be resolved during import. Please re-import this course to activate the download."
+                note.string = " This file could not be resolved during import. Please re-import this course to activate the download."
                 wrapper.append(note)
 
             anchor.replace_with(wrapper)
@@ -829,6 +860,10 @@ class AssetUploader:
         from urllib.parse import unquote
         clean_path = unquote(relative_path).split('?')[0].lstrip('/')
         
+        # Normalize $IMS-CC-FILEBASE$ to web_resources
+        import re as _re
+        clean_path = _re.sub(r'^(?:\$IMS-CC-FILEBASE\$|%24IMS-CC-FILEBASE%24)/', 'web_resources/', clean_path, flags=_re.IGNORECASE)
+        
         # 1. Try direct path
         local_file = self.source_dir / clean_path
         if local_file.exists() and local_file.is_file():
@@ -895,8 +930,12 @@ class AssetUploader:
         S3 key layout: {institution}/{program}/{course_code}/{module}/{content_type}/{filename}_{timestamp}
         """
         import time
+        import re as _re
         timestamp = int(time.time() * 1000)
-        ts_filename = f"{timestamp}_{filename}"
+        name_part, ext_part = os.path.splitext(filename)
+        clean_name = _re.sub(r'[^\w\s.-]', '', name_part)
+        clean_name = _re.sub(r'[\s]+', '_', clean_name).strip('_')
+        ts_filename = f"{timestamp}_{clean_name}{ext_part}"
         s3_key = S3_KEY_TEMPLATE.format(
             institution=self.institution,
             program=self.program_slug,

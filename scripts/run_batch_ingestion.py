@@ -168,14 +168,19 @@ def main():
 
         t0 = time.time()
         try:
+            is_wbu = program_name.upper() == "WBU"
+            univ_id = os.getenv("WBU_UNIVERSITY_ID") if is_wbu else os.getenv("DEFAULT_UNIVERSITY_ID")
+            auth_id = os.getenv("WBU_AUTHOR_ID") if is_wbu else os.getenv("DEFAULT_AUTHOR_ID")
+            inst = "WBU" if is_wbu else "SFC"
+
             result = worker.ingest(
                 source_type="zip",
                 payload={
                     "zip_path":      course_folder,          # folder — ZipAdapter handles it
-                    "university_id": os.getenv("DEFAULT_UNIVERSITY_ID"),
-                    "author_id":     os.getenv("DEFAULT_AUTHOR_ID"),
+                    "university_id": univ_id,
+                    "author_id":     auth_id,
                     "program_name":  program_name,
-                    "institution":   "SFC",   # local batch is always SFC
+                    "institution":   inst,
                     "force":         args.force,
                 }
             )

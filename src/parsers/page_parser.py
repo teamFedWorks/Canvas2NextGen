@@ -212,8 +212,8 @@ class PageParser:
                 if page:
                     pages.append(page)
             
-            # Also process IPYNB, PDF, and CSV files referenced in manifest
-            for ext, parse_func in [(".ipynb", self._parse_ipynb), (".pdf", self._parse_pdf), (".csv", self._parse_csv)]:
+            # Also process IPYNB and CSV files referenced in manifest
+            for ext, parse_func in [(".ipynb", self._parse_ipynb), (".csv", self._parse_csv)]:
                 for resource_file in self.web_resources_dir.rglob(f"*{ext}"):
                     rel_href = resource_file.relative_to(self.course_directory)
                     rel_key  = str(rel_href).replace("\\", "/").lower()

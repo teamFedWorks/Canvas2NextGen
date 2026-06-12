@@ -235,23 +235,27 @@ class IngestionWorker:
         """
         import re
         t = title.strip()
+        code = "IMPORTED"
 
         # Primary: match at start of string  e.g. "IT-1104-01-25/FA"
         match = re.match(r'^([A-Z]{2,6}[-\s]\d{3,4})', t, re.IGNORECASE)
         if match:
-            return match.group(1).replace(' ', '-').upper()
+            code = match.group(1).replace(' ', '-').upper()
+        else:
+            # Blackboard course ID pattern: DEPT####TERM...  e.g. MGMT5306SPRING...
+            match = re.match(r'^([A-Z]{2,6})(\d{3,4})', t, re.IGNORECASE)
+            if match:
+                code = f"{match.group(1).upper()}-{match.group(2)}"
+            else:
+                # Scan anywhere in the title for a standard code pattern
+                match = re.search(r'\b([A-Z]{2,6}[-]\d{3,4})\b', t, re.IGNORECASE)
+                if match:
+                    code = match.group(1).upper()
 
-        # Blackboard course ID pattern: DEPT####TERM...  e.g. MGMT5306SPRING...
-        match = re.match(r'^([A-Z]{2,6})(\d{3,4})', t, re.IGNORECASE)
-        if match:
-            return f"{match.group(1).upper()}-{match.group(2)}"
+        if "sandbox" in t.lower() and not code.endswith("-SB"):
+            code += "-SB"
 
-        # Scan anywhere in the title for a standard code pattern
-        match = re.search(r'\b([A-Z]{2,6}[-]\d{3,4})\b', t, re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
-
-        return "IMPORTED"
+        return code
 
     def _extract_department(self, title: str) -> str:
         """Derive department from course code prefix."""

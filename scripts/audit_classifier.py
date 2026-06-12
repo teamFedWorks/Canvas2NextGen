@@ -120,7 +120,7 @@ class ClassifierAuditor:
                 })
             
             # Verbose output
-            status = "✓" if is_correct and result.confidence >= record.expected_confidence_min else "⚠️"
+            status = "✓" if is_correct and result.confidence >= record.expected_confidence_min else ""
             print(f"  {status} {path.name[:40]:40s} → {result.platform.value:12s} (conf={result.confidence:.2f})")
             
             self.results.append({
@@ -185,7 +185,7 @@ class ClassifierAuditor:
 </head>
 <body>
     <div class="header">
-        <h1>🔍 Classifier Audit Report</h1>
+        <h1> Classifier Audit Report</h1>
         <p><strong>Generated:</strong> {datetime.now().isoformat()}</p>
         <p class="metric {'pass' if metrics['overall_accuracy'] >= 95 else 'warn' if metrics['overall_accuracy'] >= 90 else 'fail'}">
             Accuracy: {metrics['overall_accuracy']}%
@@ -228,7 +228,7 @@ class ClassifierAuditor:
         if self.misclassifications:
             html += """
     <div class="section fail">
-        <h2>🚨 Misclassifications</h2>
+        <h2> Misclassifications</h2>
         <table>
             <tr><th>Path</th><th>Expected</th><th>Got</th><th>Confidence</th></tr>
 """
@@ -249,7 +249,7 @@ class ClassifierAuditor:
         if self.low_confidence:
             html += """
     <div class="section warn">
-        <h2>⚠️ Low Confidence Classifications</h2>
+        <h2> Low Confidence Classifications</h2>
         <table>
             <tr><th>Path</th><th>Expected</th><th>Got</th><th>Confidence</th><th>Min Required</th></tr>
 """
@@ -297,15 +297,15 @@ class ClassifierAuditor:
 """
         if metrics["misclassifications"] > 0:
             html += """
-            <li>❌ Fix classifier logic for the misclassified cases. Review manifest patterns.</li>
+            <li> Fix classifier logic for the misclassified cases. Review manifest patterns.</li>
 """
         if metrics["low_confidence"] > 0:
             html += """
-            <li>⚠️ Add more signature patterns to boost confidence on these borderline cases.</li>
+            <li> Add more signature patterns to boost confidence on these borderline cases.</li>
 """
         if metrics["overall_accuracy"] >= 98 and metrics["threshold_compliance"] >= 98:
             html += """
-            <li>✅ Classifier is production-ready. All metrics look good.</li>
+            <li> Classifier is production-ready. All metrics look good.</li>
 """
         
         html += """

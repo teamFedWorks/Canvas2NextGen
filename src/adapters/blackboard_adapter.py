@@ -99,40 +99,84 @@ def _unescape_html(text: str) -> str:
 def _clean_bb_html(raw: str) -> str:
     """
     Unescape and lightly clean Blackboard HTML body content.
-    Strips Blackboard-specific data-* layout wrappers while keeping
-    the inner content intact.
+
+    Steps:
+    1. Unescape HTML entities (BB stores body as escaped HTML inside XML TEXT nodes).
+    2. Use BeautifulSoup to properly unwrap Blackboard Ultra layout wrapper divs
+       (data-layout-row / data-layout-column / data-bbid) — regex fails on nested divs.
+    3. Convert attachment-wrapper divs into clean, readable download links.
+    4. Strip the @X@EmbeddedFile.requestUrlStub@X@ prefix from embedded file URLs.
     """
     if not raw:
         return ""
+
     unescaped = _unescape_html(raw)
-    # Remove Blackboard Ultra layout wrapper divs (data-layout-row / data-layout-column)
-    # but keep their inner content
-    unescaped = re.sub(
-        r'<div\s+data-layout-(?:row|column)[^>]*>(.*?)</div>',
-        r'\1',
-        unescaped,
-        flags=re.DOTALL,
-    )
-    # Remove bbml editor wrapper divs
-    unescaped = re.sub(
-        r'<div\s+data-bbid="bbml-editor-id[^"]*"[^>]*>(.*?)</div>',
-        r'\1',
-        unescaped,
-        flags=re.DOTALL,
-    )
-    # Preserve embedded-file references by stripping only the stub prefix.
-    # Example:
-    #   @X@EmbeddedFile.requestUrlStub@X@bbcswebdav/xid-41004918_1
-    # becomes:
-    #   bbcswebdav/xid-41004918_1
-    # This keeps enough information for the asset uploader to resolve the
-    # corresponding csfiles/.../__xid-41004918_1.* file from the extracted package.
-    unescaped = re.sub(
-        r'@X@EmbeddedFile\.requestUrlStub@X@',
-        '',
-        unescaped,
-    )
-    return unescaped.strip()
+
+    # Strip the EmbeddedFile stub prefix before parsing so URLs are clean
+    unescaped = re.sub(r'@X@EmbeddedFile\.requestUrlStub@X@', '', unescaped)
+
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(unescaped, "html.parser")
+
+        # ── Step 1: Convert attachment-wrapper divs into readable download links ──
+        # Blackboard stores file attachments as:
+        #   <div class="attachment-wrapper" data-filename="Foo.pdf" data-mimetype="application/pdf">
+        #     <a class="bb-file-link" href="bbcswebdav/...">Attachment</a>
+        #   </div>
+        # We replace these with a clean paragraph + download link.
+        for wrapper in soup.find_all("div", class_="attachment-wrapper"):
+            filename = wrapper.get("data-filename", "")
+            mimetype = wrapper.get("data-mimetype", "")
+            # Find the existing <a> tag to get the href (may be a resolved CDN URL)
+            a_tag = wrapper.find("a")
+            href = a_tag.get("href", "") if a_tag else ""
+
+            # Build a clean replacement
+            if filename:
+                ext = filename.rsplit(".", 1)[-1].upper() if "." in filename else ""
+                label = f"📎 {filename}"
+                if href and not href.startswith("bb"):
+                    # Has a real URL — make a proper link
+                    new_tag = soup.new_tag("p")
+                    link = soup.new_tag("a", href=href, target="_blank", rel="noopener noreferrer")
+                    link.string = label
+                    new_tag.append(link)
+                else:
+                    # No resolved URL yet — show filename as plain text placeholder
+                    new_tag = soup.new_tag("p")
+                    new_tag.string = label
+                wrapper.replace_with(new_tag)
+            else:
+                # No filename — just unwrap
+                wrapper.unwrap()
+
+        # ── Step 2: Unwrap Blackboard Ultra layout wrapper divs ───────────────────
+        # These are purely structural and add no semantic value.
+        # Must be done AFTER attachment-wrapper processing (they may be nested inside).
+        for div in soup.find_all("div", attrs={"data-layout-column": True}):
+            div.unwrap()
+        for div in soup.find_all("div", attrs={"data-layout-row": True}):
+            div.unwrap()
+        # bbml editor wrapper
+        for div in soup.find_all("div", attrs={"data-bbid": re.compile(r"bbml-editor-id")}):
+            div.unwrap()
+
+        # ── Step 3: Serialize back to HTML string ─────────────────────────────────
+        result = str(soup)
+
+        # Collapse excessive whitespace introduced by unwrapping
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        result = re.sub(r'[ \t]{2,}', ' ', result)
+
+        return result.strip()
+
+    except ImportError:
+        # BeautifulSoup not available — fall back to regex (best-effort)
+        cleaned = re.sub(r'<div\s+data-layout-(?:row|column)[^>]*>', '', unescaped)
+        cleaned = re.sub(r'<div\s+data-bbid="bbml-editor-id[^"]*"[^>]*>', '', cleaned)
+        return cleaned.strip()
 
 
 # ── Manifest parser ───────────────────────────────────────────────────────────
@@ -220,13 +264,45 @@ class _BBManifest:
                         logger.info(f"[BB] Redirected {rid} ('{title}') → {richer_type} (file: {richer.get('bb_file')})")
 
     def _parse_organizations(self):
-        """Collect top-level TOC item elements."""
+        """
+        Collect top-level TOC item elements from the PRIMARY organization only.
+
+        Blackboard exports contain multiple <organization> elements:
+          - The first one (identifier="res00005" or similar) is the real course TOC.
+          - "INTERACTIVE" holds discussion board shortcuts (duplicates).
+          - "INDIRECT" holds indirect content references (duplicates).
+
+        We only want the first/primary organization to avoid duplicate modules.
+        """
         orgs = self._root.find("organizations")
         if orgs is None:
             return
-        for org in orgs.findall("organization"):
-            for item in org.findall("item"):
-                self.toc_roots.append(item)
+
+        # Use the default organization if specified, otherwise take the first one
+        default_id = orgs.get("default", "")
+        all_orgs = orgs.findall("organization")
+        if not all_orgs:
+            return
+
+        # Skip known Blackboard internal organization identifiers
+        SKIP_ORG_IDS = {"INTERACTIVE", "INDIRECT"}
+
+        primary = None
+        for org in all_orgs:
+            org_id = org.get("identifier", "")
+            if org_id in SKIP_ORG_IDS:
+                continue
+            if default_id and org_id == default_id:
+                primary = org
+                break
+            if primary is None:
+                primary = org  # take first non-skipped org
+
+        if primary is None:
+            return
+
+        for item in primary.findall("item"):
+            self.toc_roots.append(item)
 
 
 # ── .dat file readers ─────────────────────────────────────────────────────────
@@ -273,6 +349,16 @@ class _BBContentReader:
             # Plain text / empty
             return text_elem.text.strip() if text_elem.text else ""
         return _clean_bb_html(text_elem.text) if text_elem.text else ""
+
+    @property
+    def description(self) -> str:
+        """Return the plain-text DESCRIPTION attribute (used for assignment instructions)."""
+        if self._root is None:
+            return ""
+        desc_elem = self._root.find("DESCRIPTION")
+        if desc_elem is None:
+            return ""
+        return desc_elem.get("value", "").strip()
 
     @property
     def is_available(self) -> bool:
@@ -355,6 +441,21 @@ class _BBAssessmentReader:
             except ValueError:
                 pass
         return 0.0
+
+    @property
+    def is_assignment(self) -> bool:
+        """
+        True when the QTI file is actually an assignment submission portal.
+        Blackboard exports assignment drop-boxes as QTI assessments with
+        bbmd_assessment_subtype = 'Assignment'.
+        """
+        if self._root is None:
+            return False
+        meta = self._root.find(".//assessmentmetadata")
+        if meta is None:
+            return False
+        subtype = meta.find("bbmd_assessment_subtype")
+        return subtype is not None and (subtype.text or "").strip().lower() == "assignment"
 
     def get_questions(self) -> List[Dict]:
         """Extract question text and answer choices."""
@@ -471,14 +572,50 @@ def _walk_toc(
                 node["bb_type"] = "discussion"
             elif "qti-test" in bb_type or "assessment" in bb_type.lower():
                 reader = _BBAssessmentReader(dat_path)
-                node["body"] = f"<p><strong>{reader.title}</strong></p>"
-                node["max_score"] = reader.max_score
-                node["questions"] = reader.get_questions()
-                node["bb_type"] = "assessment"
-            elif "document" in bb_type or "coursetoc" in bb_type:
+                if reader.is_assignment:
+                    # This is an assignment submission portal, not a quiz.
+                    # Try to read the original CONTENT .dat for the description/instructions.
+                    # The manifest redirect changed bb_file to the QTI file, but the
+                    # original CONTENT .dat has the same identifier (e.g. res00036.dat).
+                    node["bb_type"] = "assignment"
+                    node["max_score"] = reader.max_score
+                    node["body"] = f"<p><strong>{reader.title}</strong></p>"
+                    # Read the original CONTENT .dat (same name as identifier) for description
+                    original_dat = course_dir / f"{node['identifier']}.dat"
+                    if original_dat.exists():
+                        content_reader = _BBContentReader(original_dat)
+                        desc = content_reader.description
+                        if desc:
+                            node["description"] = desc
+                else:
+                    node["body"] = f"<p><strong>{reader.title}</strong></p>"
+                    node["max_score"] = reader.max_score
+                    node["questions"] = reader.get_questions()
+                    node["bb_type"] = "assessment"
+            elif "document" in bb_type or "coursetoc" in bb_type or "lesson" in bb_type:
                 reader = _BBContentReader(dat_path)
                 node["is_folder"] = reader.is_folder
                 node["body"] = reader.body_html
+                # Capture DESCRIPTION separately — used as fallback in _node_to_items
+                # ONLY when body is still empty after ultraDocumentBody merge.
+                # Do NOT set node["body"] here from description — that would block
+                # the ultraDocumentBody merge in _node_to_items.
+                desc = reader.description
+                if desc:
+                    node["description"] = desc
+                # Detect LTI/external tool handlers — mark as external_tool type
+                handler_val = ""
+                try:
+                    import xml.etree.ElementTree as _ET
+                    _root = _ET.parse(str(dat_path)).getroot()
+                    _h = _root.find("CONTENTHANDLER")
+                    if _h is not None:
+                        handler_val = _h.get("value", "")
+                except Exception:
+                    pass
+                if "lti" in handler_val.lower() or "bltiplacement" in handler_val.lower():
+                    node["bb_type"] = "external_tool"
+                    node["is_folder"] = False
             elif "link" in bb_type:
                 node["bb_type"] = "link"
 
@@ -529,6 +666,14 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
         else:
             real_children.append(child)
 
+    # If still no body after ultraDocumentBody merge, fall back to description.
+    # Only for non-folder nodes — folder descriptions are structural labels, not content.
+    if not body and not node.get("is_folder", False):
+        desc = node.get("description", "")
+        if desc:
+            import html as _html_mod
+            body = "<p>" + _html_mod.escape(desc).replace("\n", "</p><p>") + "</p>"
+
     # Determine content type based on Blackboard resource type
     # Blackboard types are namespaced, e.g.:
     #   "assessment/x-bb-qti-test" → quiz
@@ -539,10 +684,14 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
     #   "resource/x-bb-document" → page
     if "assessment" in bb_type or "qti-test" in bb_type:
         content_type = "quiz"
+    elif bb_type == "assignment":
+        content_type = "assignment"
     elif "discussion" in bb_type or "forum" in bb_type:
         content_type = "discussion"
     elif "link" in bb_type or "weblink" in bb_type:
         content_type = "weblink"
+    elif bb_type == "external_tool":
+        content_type = "external_tool"
     elif "assignment" in bb_type:
         content_type = "assignment"
     else:
@@ -562,14 +711,19 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
     item._bb_body = body
     item._bb_max_score = node.get("max_score", 0.0)
     item._bb_questions = node.get("questions", [])
+    item._bb_description = node.get("description", "")  # assignment instructions
     item._content_ref = node.get("identifier", "")
 
-    # Only add the item if it has content OR is a meaningful container
+    # Only add the item if it has content OR is a meaningful typed item.
+    # Skip structural containers that have no renderable content after all merges.
+    # A folder that received content from its ultraDocumentBody child IS renderable.
     has_content = bool(body and body.strip())
-    has_children = bool(real_children)
-    is_assessment = content_type in ("quiz", "discussion")
+    is_typed = content_type in ("quiz", "discussion", "assignment", "weblink", "external_tool")
+    # A node is a pure structural container only if it's a folder AND has no
+    # content after ultraDocumentBody merge AND is not a typed item.
+    is_empty_folder = node.get("is_folder", False) and not has_content and not is_typed
 
-    if has_content or is_assessment:
+    if not is_empty_folder and (has_content or is_typed):
         items.append(item)
 
     # Recurse into real children (sub-items within a folder)
@@ -691,6 +845,7 @@ class BlackboardAdapter:
                     canvas_items.append(item)
 
                     body = getattr(item, "_bb_body", "")
+                    description = getattr(item, "_bb_description", "")
                     item_id = item.identifier
 
                     if item.content_type == "quiz":
@@ -703,6 +858,19 @@ class BlackboardAdapter:
                             questions=[],
                         )
                         quizzes.append(q)
+
+                    elif item.content_type == "assignment":
+                        from models.canvas_models import CanvasAssignment
+                        # Use DESCRIPTION from the CONTENT wrapper as instructions.
+                        # Fall back to body if description is empty.
+                        instructions = description or body or f"<p>{item.title}</p>"
+                        a = CanvasAssignment(
+                            title=item.title,
+                            identifier=item_id,
+                            description=instructions,
+                            points_possible=getattr(item, "_bb_max_score", 0.0),
+                        )
+                        assignments.append(a)
 
                     elif item.content_type == "discussion":
                         from models.canvas_models import CanvasDiscussion

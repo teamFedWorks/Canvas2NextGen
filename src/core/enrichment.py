@@ -404,9 +404,15 @@ class LmsCourseEnricher:
             # ── Weekly guides / instructions ──────────────────────────────
             # "WK 1 Instructions", "Week 2 Instructions", "Module 3 Overview"
             # "Module 1 Activities and Assessments", "Module 2 Interactions"
+            # Canvas: "What to do in Week #N / Module #N"
+            # Canvas: "Where to begin: Week N - Topic"
             (r"^wk\s*\d+\s+instructions?\s*$",
              "Lesson", "weekly_guide", 0.95),
             (r"^week\s*\d+\s+instructions?\s*$",
+             "Lesson", "weekly_guide", 0.95),
+            (r"^what\s+to\s+do\s+in\s+week",
+             "Lesson", "weekly_guide", 0.95),
+            (r"^where\s+to\s+begin\s*:",
              "Lesson", "weekly_guide", 0.95),
             (r"^module\s*\d+\s+(overview|instructions?|guide|objectives?|activities?(\ and\ assessments?)?|assessments?|interactions?)\s*$",
              "Lesson", "weekly_guide", 0.90),
@@ -477,6 +483,41 @@ class LmsCourseEnricher:
             # ── Student support / help ────────────────────────────────────
             (r"^student\s+(help|support|resources?)\s*$",
              "Resource", "support_resource", 0.95),
+
+            # ── Important notices / announcements ─────────────────────────
+            (r"^important\s+(information|notice|notes?|announcement)\s*$",
+             "Announcement", "course_notice", 0.95),
+            (r"^(course\s+)?notice\s*$",
+             "Announcement", "course_notice", 0.90),
+
+            # ── External tool / eTextbook access ─────────────────────────
+            (r"^wbu\s+etextbook\s+access\s*$",
+             "Resource", "external_tool", 0.95),
+            (r"etextbook|e-textbook|courseware\s+access",
+             "Resource", "external_tool", 0.90),
+
+            # ── Library / research resources ──────────────────────────────
+            (r"(library|research\s+and\s+instruction|primo|library\s+databases?|library\s+search)",
+             "Resource", "support_resource", 0.90),
+            (r"^(introduction\s+to\s+)?library\s+research\s*$",
+             "Resource", "support_resource", 0.95),
+            (r"^how\s+to\s+(search|research|find)",
+             "Resource", "how_to_guide", 0.90),
+            (r"^video\s*:\s*(how\s+to|introduction)",
+             "LiveSession", "how_to_guide", 0.90),
+
+            # ── Weblink / external URL pages ──────────────────────────────
+            # Short pages that are just a URL (e.g. "APA Formatting Website")
+            (r"(website|web\s+site|online\s+resource|external\s+link|url)\s*$",
+             "Resource", "external_resource", 0.85),
+            (r"^(apa|mla|chicago)\s+(formatting|style|citation)",
+             "Resource", "reference_template", 0.90),
+
+            # ── Canvas "Week N: Topic" intro pages ────────────────────────
+            # e.g. "Week #1: Introduction and Personal Branding"
+            # Exclude if title contains discussion/forum keywords (those are Discussion items)
+            (r"^week\s*#?\d+\s*:\s*(?!.*\b(discussion|forum|board|dialog|response|replies?)\b)",
+             "Lesson", "weekly_guide", 0.90),
         ]
         self._PATTERN_RULES = [
             (re.compile(pattern, re.IGNORECASE), ctype, itype, conf)
@@ -490,10 +531,27 @@ class LmsCourseEnricher:
         Enrich all curriculum items in *lms_course* in-place.
         Returns the same object for convenient chaining.
         """
+        # Structural header titles used in Canvas as section dividers — no real content
+        STRUCTURAL_HEADERS = {"watch:", "read:", "complete:", "listen:", "view:", "do:"}
+
         for module in lms_course.curriculum:
+            # Pass 1: classify all items, filter structural headers
+            real_items = []
             for idx, item in enumerate(module.items):
+                title_stripped = (item.title or "").strip().lower().rstrip(".")
+                # Drop Canvas structural section-header items (no content, just a label)
+                if title_stripped in STRUCTURAL_HEADERS and not (item.content or "").strip():
+                    continue
                 item.position = idx
                 self._enrich_item(item)
+                real_items.append(item)
+            module.items = real_items
+
+            # Pass 2: backfill stub assignment content from the week instructions
+            # Blackboard assignment items are submission portals — their instructions
+            # live in the preceding "WK N Instructions" page in the same module.
+            # We extract the relevant section and attach it to the assignment.
+            self._backfill_assignment_content(module.items)
 
         logger.info(
             "LMS course enrichment complete",
@@ -503,6 +561,72 @@ class LmsCourseEnricher:
             },
         )
         return lms_course
+
+    def _backfill_assignment_content(self, items: list) -> None:
+        """
+        For assignment items whose content is just a title stub, extract
+        the relevant instructions from the preceding weekly guide in the
+        same module.
+
+        Strategy: find the last 'weekly_guide' Lesson before each stub
+        Assignment, then search its HTML for a section that mentions the
+        assignment title. If found, use that section as the assignment content.
+        """
+        # Find the weekly guide (WK N Instructions) in this module
+        guide_content = ""
+        for item in items:
+            if item.type == "Lesson" and item.instructionalType == "weekly_guide":
+                guide_content = item.content or ""
+
+            if item.type == "Assignment":
+                stub = f"<p><strong>{item.title}</strong></p>"
+                content = (item.content or "").strip()
+                # Only backfill if content is a stub (just the title wrapped in tags)
+                if content and content != stub:
+                    continue  # already has real content
+
+                if not guide_content:
+                    continue  # no guide to pull from
+
+                # Try to extract the relevant section from the guide
+                extracted = self._extract_assignment_section(item.title, guide_content)
+                if extracted:
+                    item.content = extracted
+
+    def _extract_assignment_section(self, assignment_title: str, guide_html: str) -> str:
+        """
+        Extract the section of guide_html that describes the given assignment.
+        Returns the extracted HTML or empty string if not found.
+        """
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(guide_html, "html.parser")
+            title_lower = assignment_title.lower()
+
+            # Strategy 1: find a list item or paragraph that mentions the assignment title
+            # and return it plus the next few sibling elements
+            for tag in soup.find_all(["li", "p", "h3", "h4", "h5"]):
+                text = tag.get_text(separator=" ", strip=True).lower()
+                if title_lower in text:
+                    # Collect this element and up to 3 following siblings
+                    parts = [str(tag)]
+                    sibling = tag.find_next_sibling()
+                    count = 0
+                    while sibling and count < 3:
+                        sibling_text = sibling.get_text(strip=True)
+                        if sibling_text:
+                            parts.append(str(sibling))
+                            count += 1
+                        sibling = sibling.find_next_sibling()
+                    if parts:
+                        return "".join(parts)
+
+            # Strategy 2: return the full guide content as context
+            # (better than a stub)
+            return guide_html
+
+        except Exception:
+            return ""
 
     # ── Private helpers ───────────────────────────────────────────────────
 
@@ -523,6 +647,10 @@ class LmsCourseEnricher:
                 item.interactionLevel = self._INTERACTION.get(item.type, "active")
                 item.estimatedDuration = self._estimate_duration(item)
                 item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
+                # Map other types to Lesson
+                if item.type not in ["Lesson", "Quiz", "Assignment", "Discussion"]:
+                    item.type = "Lesson"
+                self._extract_video_links(item)
                 return  # fully handled
 
             # Genuine quiz — mark as structurally certain
@@ -550,6 +678,10 @@ class LmsCourseEnricher:
                 item.interactionLevel = self._INTERACTION.get(ctype, "passive")
                 item.estimatedDuration = self._estimate_duration(item)
                 item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
+                # Map other types to Lesson
+                if item.type not in ["Lesson", "Quiz", "Assignment", "Discussion"]:
+                    item.type = "Lesson"
+                self._extract_video_links(item)
                 return
 
         # ── Layer 2 + 3: keyword scoring on title + content body ──────────
@@ -560,6 +692,39 @@ class LmsCourseEnricher:
         item.interactionLevel = self._INTERACTION.get(item.type, "passive")
         item.estimatedDuration = self._estimate_duration(item)
         item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
+        # Map other types to Lesson
+        if item.type not in ["Lesson", "Quiz", "Assignment", "Discussion"]:
+            item.type = "Lesson"
+        self._extract_video_links(item)
+
+    def _extract_video_links(self, item: "LmsCurriculumItem") -> None:
+        """Extract Zoom or YuJa video URL from content if present and set videoUrl."""
+        if item.content:
+            from bs4 import BeautifulSoup
+            try:
+                soup = BeautifulSoup(item.content, "html.parser")
+                extracted_url = None
+                
+                # Check for iframes
+                for iframe in soup.find_all("iframe", src=True):
+                    src = iframe["src"]
+                    if "yuja.com" in src or "zoom.us" in src:
+                        extracted_url = src
+                        break
+                        
+                # Check for anchors if no iframe found
+                if not extracted_url:
+                    for anchor in soup.find_all("a", href=True):
+                        href = anchor["href"]
+                        if "yuja.com" in href or "zoom.us" in href:
+                            extracted_url = href
+                            break
+                            
+                if extracted_url:
+                    import html as _html
+                    item.videoUrl = _html.unescape(extracted_url)
+            except Exception as e:
+                logger.warning(f"Failed to extract video URL from content: {e}")
 
     def _correct_quiz_misclassification(
         self,
@@ -681,7 +846,9 @@ class LmsCourseEnricher:
         resource_kws = ["resource", "support", "help", "tutorial", "uploading",
                         "faq", "practice", "solution", "materials", "handout",
                         "extra credit", "prep", "dataset", "csv",
-                        "ipynb", "exercise", "lab", "answer"]
+                        "ipynb", "exercise", "lab", "answer",
+                        "library", "website", "web site", "database",
+                        "how to search", "how to research", "how to find"]
         c = _score(resource_kws, 0.80)
         if c:
             return "Resource", c
@@ -690,6 +857,9 @@ class LmsCourseEnricher:
         live_kws = ["zoom", "webinar", "live session", "video", "recording",
                     "meeting", "presentation", "lecture"]
         live_exts = (".mp4", ".mov", ".avi", ".pptx", ".ppt", ".key")
+        # "Video: How to..." prefix is a strong LiveSession signal
+        if title_lower.startswith("video:") or title_lower.startswith("video -"):
+            return "LiveSession", 0.90
         c = _score(live_kws, 0.80)
         if c:
             return "LiveSession", c

@@ -119,9 +119,9 @@ def build_email(record: dict, ingestion_status: str) -> tuple:
     size_human  = format_size(size_bytes)
 
     is_real   = size_bytes > 10_000
-    size_note = "" if is_real else "  ⚠️  File is very small — may be a test upload"
+    size_note = "" if is_real else "    File is very small — may be a test upload"
 
-    subject = f"📦 {event_label}: {filename} — {institution} / {program}"
+    subject = f" {event_label}: {filename} — {institution} / {program}"
 
     body = f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -173,7 +173,7 @@ def trigger_ingestion(s3_key: str, bucket: str, institution: str) -> str:
     """
     if not API_BASE_URL or not API_KEY:
         return (
-            "⚠️  Ingestion API not configured (ONBOARDING_API_URL / ONBOARDING_API_KEY missing).\n"
+            "  Ingestion API not configured (ONBOARDING_API_URL / ONBOARDING_API_KEY missing).\n"
             "   Manual ingestion required:\n"
             f"   python main.py ingest s3 --institution {institution} --force"
         )
@@ -184,7 +184,7 @@ def trigger_ingestion(s3_key: str, bucket: str, institution: str) -> str:
 
     if not university_id:
         return (
-            f"⚠️  No MongoDB university ID configured for institution '{institution}'.\n"
+            f"  No MongoDB university ID configured for institution '{institution}'.\n"
             "   Set WBU_UNIVERSITY_ID (or SFC_UNIVERSITY_ID) in the Lambda environment.\n"
             "   Manual ingestion required."
         )
@@ -212,20 +212,20 @@ def trigger_ingestion(s3_key: str, bucket: str, institution: str) -> str:
             body = json.loads(resp.read().decode("utf-8"))
             task_id = body.get("task_id", "unknown")
             return (
-                f"✅ Ingestion pipeline triggered successfully.\n"
+                f" Ingestion pipeline triggered successfully.\n"
                 f"   Task ID : {task_id}\n"
                 f"   Monitor : GET {API_BASE_URL}/status/{task_id}"
             )
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8", errors="replace")[:300]
         return (
-            f"❌ Ingestion API returned HTTP {e.code}.\n"
+            f" Ingestion API returned HTTP {e.code}.\n"
             f"   Response: {error_body}\n"
             "   Manual ingestion may be required."
         )
     except Exception as e:
         return (
-            f"❌ Could not reach ingestion API: {e}\n"
+            f" Could not reach ingestion API: {e}\n"
             "   The ECS service may be stopped (it is adhoc).\n"
             f"   Start it with: .\\aws_infra\\start-service.ps1\n"
             f"   Then run: python main.py ingest s3 --institution {institution} --force"

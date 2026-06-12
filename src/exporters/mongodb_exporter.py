@@ -45,9 +45,21 @@ class MongoDBExporter:
         if program:
             return str(program["_id"])
 
+        import re
+        bundle_url = re.sub(r'[-\s]+', '-', re.sub(r'[^\w\s-]', '', program_title.lower())).strip('-')
+
+        # Also check by bundleUrl to prevent unique index duplicates
+        program = programs_col.find_one({
+            "universityId": university_id,
+            "bundleUrl": bundle_url
+        })
+        if program:
+            return str(program["_id"])
+
         # Create new program if not found
         new_program = {
             "title": program_title,
+            "bundleUrl": bundle_url,
             "universityId": university_id,
             "created_at": datetime.datetime.utcnow(),
             "status": "active"

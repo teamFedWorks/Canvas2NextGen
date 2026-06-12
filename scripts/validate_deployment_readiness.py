@@ -241,7 +241,7 @@ def generate_html_report(results: Dict[str, Dict[str, Any]], output_path: Path):
 </head>
 <body>
     <div class="header">
-        <h1>🚀 Deployment Readiness Validation</h1>
+        <h1> Deployment Readiness Validation</h1>
         <p>Canonical Pipeline Production Validation</p>
         <div class="score {'score-good' if score >= 90 else 'score-warn' if score >= 70 else 'score-bad'}">
             {score:.0f}% Ready
@@ -253,7 +253,7 @@ def generate_html_report(results: Dict[str, Dict[str, Any]], output_path: Path):
 """
     
     for check_name, result in results.items():
-        status_icon = {"passed": "✅", "failed": "❌", "warn": "⚠️", "skipped": "⏭️"}.get(result["status"], "❓")
+        status_icon = {"passed": "", "failed": "", "warn": "", "skipped": ""}.get(result["status"], "")
         css_class = result["status"]
         
         html += f"""
@@ -285,26 +285,26 @@ def generate_html_report(results: Dict[str, Dict[str, Any]], output_path: Path):
     # Recommendations
     html += """
     <div class="recommendations">
-        <h2>📋 Recommendations</h2>
+        <h2> Recommendations</h2>
         <ul>
 """
     if score >= 95:
         html += """
-            <li>✅ <strong>Ready for production:</strong> All critical checks passed.</li>
-            <li>✅ <strong>Next step:</strong> Begin canary rollout at 5%.</li>
-            <li>✅ <strong>Monitoring:</strong> Set up alerts for the dashboard panels.</li>
+            <li> <strong>Ready for production:</strong> All critical checks passed.</li>
+            <li> <strong>Next step:</strong> Begin canary rollout at 5%.</li>
+            <li> <strong>Monitoring:</strong> Set up alerts for the dashboard panels.</li>
 """
     elif score >= 80:
         html += """
-            <li>⚠️ <strong>Minor issues detected:</strong> Review warnings above.</li>
-            <li>📝 <strong>Action:</strong> Fix flagged items before full rollout.</li>
-            <li>🧪 <strong>Testing:</strong> Run additional reconciliation on 10 more courses.</li>
+            <li> <strong>Minor issues detected:</strong> Review warnings above.</li>
+            <li> <strong>Action:</strong> Fix flagged items before full rollout.</li>
+            <li> <strong>Testing:</strong> Run additional reconciliation on 10 more courses.</li>
 """
     else:
         html += """
-            <li>❌ <strong>Not ready:</strong> Critical failures must be addressed.</li>
-            <li>🔍 <strong>Action:</strong> Review failed checks and fix root causes.</li>
-            <li>⏸️ <strong>Do NOT deploy</strong> until score ≥ 80.</li>
+            <li> <strong>Not ready:</strong> Critical failures must be addressed.</li>
+            <li> <strong>Action:</strong> Review failed checks and fix root causes.</li>
+            <li> <strong>Do NOT deploy</strong> until score ≥ 80.</li>
 """
     
     html += """
@@ -312,7 +312,7 @@ def generate_html_report(results: Dict[str, Dict[str, Any]], output_path: Path):
     </div>
 
     <div class="section">
-        <h2>📊 Detailed Metrics</h2>
+        <h2> Detailed Metrics</h2>
         <table>
             <tr><th>Check</th><th>Status</th><th>Duration</th></tr>
 """
@@ -375,7 +375,7 @@ def main():
         return 1
     
     print("\n" + "="*60)
-    print("🚀 DEPLOYMENT READINESS VALIDATION")
+    print(" DEPLOYMENT READINESS VALIDATION")
     print("="*60)
     
     # Run selected checks
@@ -406,13 +406,13 @@ def main():
     print(f"\n{'='*60}")
     print(f"FINAL SCORE: {score:.1f}%")
     if score >= 95:
-        print("✅ READY FOR PRODUCTION")
+        print(" READY FOR PRODUCTION")
         return 0
     elif score >= 80:
-        print("⚠️  ACCEPTABLE WITH WARNINGS")
+        print("  ACCEPTABLE WITH WARNINGS")
         return 0
     else:
-        print("❌ NOT READY - FIX ISSUES")
+        print(" NOT READY - FIX ISSUES")
         return 1
 
 

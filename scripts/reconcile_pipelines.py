@@ -172,10 +172,10 @@ class PipelineReconciler:
                 import traceback
                 result.errors.append(traceback.format_exc())
         
-         finally:
-             result.processing_time = (datetime.now() - start).total_seconds()
-         
-         return result
+        finally:
+            result.processing_time = (datetime.now() - start).total_seconds()
+        
+        return result
     
     def _run_canonical(self) -> PipelineResult:
         """Execute the new CanonicalPipeline."""
@@ -783,18 +783,18 @@ class PipelineReconciler:
         score = comparison["reconciliation"].get("score", 0)
         if score >= 99:
             html += """
-            <li>✅ Pipelines are in near-perfect agreement. Ready for production rollout.</li>
+            <li> Pipelines are in near-perfect agreement. Ready for production rollout.</li>
             <li>Consider enabling canonical pipeline for all new ingestions.</li>
 """
         elif score >= 95:
             html += """
-            <li>⚠️ Minor discrepancies detected. Review the diffs above.</li>
+            <li> Minor discrepancies detected. Review the diffs above.</li>
             <li>Recommended: Run on 10 more courses to verify pattern.</li>
             <li>Do NOT proceed to full production until score ≥ 99.</li>
 """
         else:
             html += """
-            <li>❌ Significant discrepancies found. Pipeline NOT ready.</li>
+            <li> Significant discrepancies found. Pipeline NOT ready.</li>
             <li>Action items:
                 <ol>
                     <li>Review all critical mismatches in content counts</li>

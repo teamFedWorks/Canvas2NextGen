@@ -160,6 +160,10 @@ class LmsCurriculumItem:
     # Stored inline under the course document (Phase 1 fix).
     questions: List[LmsQuestion] = field(default_factory=list)
 
+    # Video content fields
+    videoUrl: Optional[str] = None
+    video: Optional[str] = None
+
     # ── Semantic enrichment fields ────────────────────────────────────────────
     # Populated by LmsCourseEnricher after CourseTransformer runs.
     # These survive persistence and are surfaced in validation reports.
