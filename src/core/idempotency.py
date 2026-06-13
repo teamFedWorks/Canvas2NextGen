@@ -19,6 +19,13 @@ from observability.logger import get_logger
 logger = get_logger(__name__)
 
 
+def build_promotion_dedup_id(course_id: str, content_fingerprint: str) -> str:
+    """Standardized promotion deduplication ID helper using courseId and contentFingerprint."""
+    return hashlib.sha256(
+        f"{course_id}:{content_fingerprint}".encode("utf-8")
+    ).hexdigest()
+
+
 @dataclass
 class ContentHash:
     """Content hash with algorithm."""
@@ -117,9 +124,12 @@ class IdempotencyService:
     Storage backend: MongoDB collection 'idempotency_keys'
     """
     
-    def __init__(self, mongodb_uri: Optional[str] = None):
+    def __init__(self, mongodb_uri: Optional[str] = None, database_name: Optional[str] = None):
+        import os
         from exporters.mongodb_exporter import MongoDBExporter
-        self.db = MongoDBExporter(mongodb_uri)
+        uri = mongodb_uri or os.getenv("ULCP_MONGODB_URI")
+        db = database_name or os.getenv("ULCP_MONGODB_DATABASE", "test")
+        self.db = MongoDBExporter(mongodb_uri=uri, database_name=db)
     
     def compute_course_hashes(
         self, 

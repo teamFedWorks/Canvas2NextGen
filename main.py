@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 EduvateHub Course Onboarding - Unified Entry Point
 
@@ -97,6 +97,11 @@ Examples:
     worker_parser.add_argument("--queue", help="SQS queue URL (overrides env var)")
     worker_parser.add_argument("--region", default="us-east-2", help="AWS region")
 
+    # --- Promotion Worker Command ---
+    promo_worker_parser = subparsers.add_parser("promotion-worker", help="Start the automated SQS FIFO promotion consumer")
+    promo_worker_parser.add_argument("--queue", help="SQS promotion FIFO queue URL (overrides env var)")
+    promo_worker_parser.add_argument("--region", default="us-east-2", help="AWS region")
+
     args = parser.parse_args()
 
     # Dispatch to commands
@@ -121,6 +126,9 @@ Examples:
             
         elif args.command == "worker":
             commands.start_worker(args.workers, args.queue, args.region)
+            
+        elif args.command == "promotion-worker":
+            commands.start_promotion_worker(args.queue, args.region)
             
     except KeyboardInterrupt:
         print("\nOperation cancelled by user.")

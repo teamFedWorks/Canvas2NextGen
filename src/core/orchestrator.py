@@ -303,9 +303,12 @@ class InMemoryJobStore:
 class MongoDBJobStore:
     """MongoDB-backed persistent job store."""
     
-    def __init__(self, mongodb_uri: Optional[str] = None):
+    def __init__(self, mongodb_uri: Optional[str] = None, database_name: Optional[str] = None):
+        import os
         from exporters.mongodb_exporter import MongoDBExporter
-        self.db = MongoDBExporter(mongodb_uri)
+        uri = mongodb_uri or os.getenv("ULCP_MONGODB_URI")
+        db = database_name or os.getenv("ULCP_MONGODB_DATABASE", "test")
+        self.db = MongoDBExporter(mongodb_uri=uri, database_name=db)
     
     def get(self, job_id: str) -> Optional[Dict[str, Any]]:
         self.db._ensure_connection()

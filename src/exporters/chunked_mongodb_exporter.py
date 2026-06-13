@@ -38,8 +38,10 @@ class ChunkedMongoExporter:
     MAX_DOC_SIZE = 15 * 1024 * 1024  # 15MB safe margin
     
     def __init__(self, mongodb_uri: str = None, database_name: str = None):
-        self.uri = mongodb_uri or os.getenv("MONGODB_URI")
-        self.db_name = database_name or os.getenv("MONGODB_DATABASE", "lms_db")
+        self.uri = mongodb_uri or os.getenv("ULCP_MONGODB_URI")
+        if not self.uri:
+            raise ValueError("MongoDB connection URI must be explicitly provided or configured via 'ULCP_MONGODB_URI' environment variable.")
+        self.db_name = database_name or os.getenv("ULCP_MONGODB_DATABASE", "test")
         self._client = None
         self._db = None
     

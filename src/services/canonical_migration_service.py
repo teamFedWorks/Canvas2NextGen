@@ -175,12 +175,14 @@ class CanonicalMigrationService:
                         "reason": "duplicate"
                     }
             
+            job.source_metadata["content_fingerprint"] = content_hash.value
             job.checkpoint(
                 stage=JobState.CLASSIFIED,
                 progress=20,
                 message="No duplicate found",
                 artifacts=[f"manifest_hash={manifest_hash.value[:16]}", f"content_hash={content_hash.value[:16]}"]
             )
+            self.orchestrator._persist_job(job)
         
         # Stage 3: Resolve manifest
         self.orchestrator.transition_to(job.job_id, JobState.RESOLVING, 25, "Resolving dependencies")
@@ -201,6 +203,8 @@ class CanonicalMigrationService:
         result = pipeline.run()
         
         if result["status"] == "success":
+            job.course_id = result.get("course_id")
+            self.orchestrator._persist_job(job)
             self.orchestrator.transition_to(
                 job.job_id, JobState.PARSED, 50, "Parsing complete",
                 metadata={"warnings": result.get("warnings", [])}

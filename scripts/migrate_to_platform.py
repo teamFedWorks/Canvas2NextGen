@@ -38,10 +38,15 @@ from pymongo import MongoClient, UpdateOne
 import bson
 
 # ── Connection strings ────────────────────────────────────────────────────────
-PIPELINE_URI = os.getenv("MONGODB_URI")  # cluster0.zyucmd7 / lms_db
-PLATFORM_URI = "mongodb+srv://varunsunkara_db_user:8x72VeR38dYwomSz@cluster-staging.jsxinqf.mongodb.net/?appName=Cluster-Staging"
-PLATFORM_DB  = "test"
-PIPELINE_DB  = "test"
+PIPELINE_URI = os.getenv("ULCP_MONGODB_URI")
+PLATFORM_URI = os.getenv("PLATFORM_MONGODB_URI")
+PLATFORM_DB  = os.getenv("PLATFORM_MONGODB_DATABASE", "test")
+PIPELINE_DB  = os.getenv("ULCP_MONGODB_DATABASE", "test")
+
+if not PIPELINE_URI:
+    raise RuntimeError("ULCP_MONGODB_URI is not configured in the environment.")
+if not PLATFORM_URI:
+    raise RuntimeError("PLATFORM_MONGODB_URI is not configured in the environment.")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

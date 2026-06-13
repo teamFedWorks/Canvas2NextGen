@@ -75,6 +75,14 @@ class TraceContext:
         end = self.completed_at or datetime.utcnow()
         return (end - self.started_at).total_seconds() * 1000
 
+    def __enter__(self) -> 'TraceContext':
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.completed_at = datetime.utcnow()
+        _correlation_id_ctx.set(None)
+        _trace_ctx.set(None)
+
 
 @dataclass
 class Span:
@@ -91,6 +99,12 @@ class Span:
     def end(self):
         self.ended_at = datetime.utcnow()
         self.duration_ms = (self.ended_at - self.started_at).total_seconds() * 1000
+
+    def __enter__(self) -> 'Span':
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end()
 
 
 class TracingMiddleware:
@@ -226,3 +240,6 @@ class TraceLogger:
     
     def debug(self, msg: str, extra: Dict[str, Any] = None):
         self.logger.debug(msg, extra=self._extra(extra))
+
+    def exception(self, msg: str, extra: Dict[str, Any] = None, *args, **kwargs):
+        self.logger.exception(msg, extra=self._extra(extra), *args, **kwargs)

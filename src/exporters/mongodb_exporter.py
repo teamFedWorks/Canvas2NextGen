@@ -18,9 +18,11 @@ class MongoDBExporter:
 
     MAX_BSON_SIZE = 15.5 * 1024 * 1024  # 15.5MB (safe margin below 16MB)
 
-    def __init__(self, mongodb_uri: str = None, database_name: str = None):
-        self.uri = mongodb_uri or os.getenv("MONGODB_URI")
-        self.db_name = database_name or os.getenv("MONGODB_DATABASE", "lms_db")
+    def __init__(self, mongodb_uri: str, database_name: str = "test"):
+        if not mongodb_uri:
+            raise ValueError("MongoDB connection URI must be explicitly provided to MongoDBExporter.")
+        self.uri = mongodb_uri
+        self.db_name = database_name or "test"
         self._client = None
         self._db = None
 

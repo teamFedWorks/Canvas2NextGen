@@ -302,28 +302,61 @@ def generate_report(course: str | None, output: str | None, no_html: bool = Fals
     finally:
         sys.argv = old_argv
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# worker (SQS consumer)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def start_worker(max_workers: int = 10, queue_url: str | None = None, region: str = "us-east-2"):
-    """Start the SQS-driven ingestion worker."""
-    from messaging.sqs_integration import SQSWorker
+    """Start the SQS-driven ingestion worker using the new UCAE IngestionQueueListener."""
+    import time
+    from pymongo import MongoClient
+    from ucae.worker.listener import IngestionQueueListener
+    from ucae.providers.registry import ProviderRegistry
+    from ucae.providers.dummy import DummyProvider
+    from ucae.canonical.normalizer import CanonicalNormalizer
 
     queue = queue_url or os.getenv("SQS_QUEUE_URL", "")
     if not queue:
         print("[worker] ERROR: SQS_QUEUE_URL not set. Pass --queue or set the env var.")
         sys.exit(1)
 
-    print(f"[worker] Starting SQS consumer on {queue} with {max_workers} workers...")
-    worker = SQSWorker(queue_url=queue, region=region, max_workers=max_workers)
-    worker.run()
+    mongo_uri = os.getenv("ULCP_MONGODB_URI")
+    if not mongo_uri:
+        print("[worker] ERROR: ULCP_MONGODB_URI not set in environment.")
+        sys.exit(1)
 
+    intake_bucket = os.getenv("S3_INGESTION_BUCKET")
+    artifact_bucket = os.getenv("S3_CDN_BUCKET")
+    if not intake_bucket or not artifact_bucket:
+        print("[worker] ERROR: S3_INGESTION_BUCKET or S3_CDN_BUCKET not set in environment.")
+        sys.exit(1)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# helpers
-# ─────────────────────────────────────────────────────────────────────────────
+    print(f"[worker] Starting SQS consumer on {queue}...")
+    db_client = MongoClient(mongo_uri)
+    
+    provider_registry = ProviderRegistry()
+    provider_registry.register(DummyProvider())
+    normalizer = CanonicalNormalizer()
+
+    listener = IngestionQueueListener(
+        queue_url=queue,
+        db_client=db_client,
+        provider_registry=provider_registry,
+        normalizer=normalizer
+    )
+
+    try:
+        listener.run_startup_self_checks(intake_bucket, artifact_bucket)
+    except Exception as e:
+        print(f"[worker] Startup self-checks FAILED: {e}")
+        sys.exit(1)
+
+    print("[worker] Worker is running. Polling SQS for messages...")
+    try:
+        while True:
+            # Poll and process messages
+            listener.poll_messages(max_messages=1, wait_time_seconds=10)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[worker] Stopping worker...")
+    finally:
+        db_client.close()
 
 def _print_result(result: dict):
     status = result.get("status", "unknown")
@@ -335,3 +368,46 @@ def _print_result(result: dict):
     else:
         error = result.get("error", "unknown error")
         print(f"  [FAIL] FAILED   {error}")
+
+
+def start_promotion_worker(queue_url: str | None = None, region: str = "us-east-2"):
+    """Start the SQS-driven promotion worker using the new PromotionQueueListener."""
+    import time
+    from pymongo import MongoClient
+    from ucae.worker.promotion_listener import PromotionQueueListener
+
+    queue = queue_url or os.getenv("PROMOTION_FIFO_QUEUE_URL", "")
+    if not queue:
+        print("[promotion-worker] ERROR: PROMOTION_FIFO_QUEUE_URL not set. Pass --queue or set the env var.")
+        sys.exit(1)
+
+    ulcp_mongo_uri = os.getenv("ULCP_MONGODB_URI")
+    if not ulcp_mongo_uri:
+        print("[promotion-worker] ERROR: ULCP_MONGODB_URI not set in environment.")
+        sys.exit(1)
+
+    platform_mongo_uri = os.getenv("PLATFORM_MONGODB_URI")
+    if not platform_mongo_uri:
+        print("[promotion-worker] ERROR: PLATFORM_MONGODB_URI not set in environment.")
+        sys.exit(1)
+
+    print(f"[promotion-worker] Starting SQS promotion consumer on {queue}...")
+    ulcp_client = MongoClient(ulcp_mongo_uri)
+    platform_client = MongoClient(platform_mongo_uri)
+
+    listener = PromotionQueueListener(
+        queue_url=queue,
+        ulcp_db_client=ulcp_client,
+        platform_db_client=platform_client
+    )
+
+    print("[promotion-worker] Promotion worker is running. Polling SQS for messages...")
+    try:
+        while True:
+            listener.poll_messages(max_messages=1, wait_time_seconds=10)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[promotion-worker] Stopping promotion worker...")
+    finally:
+        ulcp_client.close()
+        platform_client.close()

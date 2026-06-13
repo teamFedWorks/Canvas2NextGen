@@ -53,6 +53,7 @@ class AssetUploader:
         institution: str = "",
         program_slug: str = "general",
         course_code: str = "IMPORTED",
+        db_client=None,
     ):
         """
         Initialize the uploader.
@@ -62,6 +63,8 @@ class AssetUploader:
             program_slug: URL-safe program name (e.g. 'bs-information-technology').
             course_code:  Course code (e.g. 'ENT-1001', 'MGMT-5306').
         """
+        from ucae.canonical.assets import AssetRegistry
+        self.asset_registry = AssetRegistry(db_client)
         resolved_institution = (institution or "").strip()
         if not resolved_institution:
             resolved_institution = os.getenv("DEFAULT_INSTITUTION", "")
@@ -381,16 +384,15 @@ class AssetUploader:
                 if ext not in UPLOADABLE_EXTENSIONS:
                     continue
                 
-                local_file = self.source_dir / href
-                if not local_file.exists():
+                local_file = self._resolve_local_file(href)
+                if not local_file:
                     alt_href = href.replace(':', '_')
-                    alt_file = self.source_dir / alt_href
-                    if alt_file.exists():
-                        local_file = alt_file
-                    else:
-                        with self._stats_lock:
-                            self.stats["skipped"] += 1
-                        continue
+                    local_file = self._resolve_local_file(alt_href)
+                    
+                if not local_file or not local_file.exists():
+                    with self._stats_lock:
+                        self.stats["skipped"] += 1
+                    continue
                 
                 # Skip if already uploaded (from HTML pass)
                 with self._upload_lock:
@@ -631,7 +633,7 @@ class AssetUploader:
                     local_path = None
 
             if local_path is None and self.source_dir and local_href:
-                local_path = self.source_dir / local_href
+                local_path = self._resolve_local_file(local_href)
 
             # --- Infer proper file extension and name ---
             params = self._get_safe_upload_params(local_path, file_name, mime_type)
@@ -865,9 +867,16 @@ class AssetUploader:
         clean_path = _re.sub(r'^(?:\$IMS-CC-FILEBASE\$|%24IMS-CC-FILEBASE%24)/', 'web_resources/', clean_path, flags=_re.IGNORECASE)
         
         # 1. Try direct path
-        local_file = self.source_dir / clean_path
-        if local_file.exists() and local_file.is_file():
-            return local_file
+        if hasattr(self.source_dir, "get_file_path"):
+            try:
+                if self.source_dir.exists(clean_path):
+                    return self.source_dir.get_file_path(clean_path)
+            except Exception:
+                pass
+        else:
+            local_file = self.source_dir / clean_path
+            if local_file.exists() and local_file.is_file():
+                return local_file
 
         # 2. Try xid-based resolution (common in Blackboard images/links)
         m = re.search(r'xid-(\d+_\d+)', clean_path, flags=re.IGNORECASE)
@@ -916,6 +925,14 @@ class AssetUploader:
             'content_type': final_mime or 'application/octet-stream'
         }
 
+    def _compute_checksum(self, file_path: Path) -> str:
+        import hashlib
+        sha = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha.update(chunk)
+        return sha.hexdigest()
+
     def _perform_s3_upload(
         self,
         local_path: Path,
@@ -931,19 +948,96 @@ class AssetUploader:
         """
         import time
         import re as _re
-        timestamp = int(time.time() * 1000)
-        name_part, ext_part = os.path.splitext(filename)
-        clean_name = _re.sub(r'[^\w\s.-]', '', name_part)
-        clean_name = _re.sub(r'[\s]+', '_', clean_name).strip('_')
-        ts_filename = f"{timestamp}_{clean_name}{ext_part}"
-        s3_key = S3_KEY_TEMPLATE.format(
-            institution=self.institution,
-            program=self.program_slug,
-            course_code=self.course_code,
-            module=module_slug or "assets",
-            content_type=content_type_folder or "assets",
-            filename=ts_filename,
-        )
+        
+        # 1. Compute checksum and check global AssetRegistry
+        checksum = None
+        s3_key = None
+        final_url = None
+        if local_path and local_path.exists():
+            try:
+                checksum = self._compute_checksum(local_path)
+                
+                # Construct deterministic S3 Key using checksum to resolve rollback orphans
+                name_part, ext_part = os.path.splitext(filename)
+                clean_name = _re.sub(r'[^\w\s.-]', '', name_part)
+                clean_name = _re.sub(r'[\s]+', '_', clean_name).strip('_')
+                deterministic_filename = f"{checksum}_{clean_name}{ext_part}"
+                s3_key = S3_KEY_TEMPLATE.format(
+                    institution=self.institution,
+                    program=self.program_slug,
+                    course_code=self.course_code,
+                    module=module_slug or "assets",
+                    content_type=content_type_folder or "assets",
+                    filename=deterministic_filename,
+                )
+                final_url = f"{self.cdn_base_url}/{s3_key}" if self.cdn_base_url else f"https://{self.s3_bucket}.s3.amazonaws.com/{s3_key}"
+                
+                status, registered = self.asset_registry.reserve_asset(checksum, worker_id=self.course_id, lease_secs=300)
+                if status == "COMPLETED" and registered:
+                    logger.info(f"  [DEDUPLICATED] Asset {filename} already uploaded globally (checksum: {checksum}). Skipping S3 upload.")
+                    return registered.cdn_url
+                
+                # RECOVERY CHECK: If registry status is not completed, check if S3 file already exists.
+                # If it exists, the database transaction rolled back but S3 succeeded. We can repair the registry now.
+                try:
+                    self.s3_client.head_object(Bucket=self.s3_bucket, Key=s3_key)
+                    logger.info(f"  [RECOVERY] Asset {filename} already exists in S3. Repairing database asset registry.")
+                    size_bytes = local_path.stat().st_size
+                    content_type = content_type_override or self._guess_content_type(local_path)
+                    
+                    self.asset_registry.complete_upload(
+                        checksum=checksum,
+                        s3_key=s3_key,
+                        cdn_url=final_url,
+                        size_bytes=size_bytes,
+                        mime_type=content_type
+                    )
+                    return final_url
+                except Exception:
+                    # Object does not exist in S3, proceed with standard upload
+                    pass
+                
+                # If uploading or verifying (another task is actively processing it), wait with exponential backoff
+                if status in ["UPLOADING", "VERIFYING"]:
+                    logger.info(f"  [WAITING] Asset {filename} is being processed by another worker. Waiting...")
+                    backoff = 1
+                    start_wait = time.time()
+                    while time.time() - start_wait < 30:
+                        time.sleep(backoff)
+                        asset = self.asset_registry.get_asset(checksum)
+                        if asset:
+                            logger.info(f"  [COMPLETED] Asset {filename} upload completed by another task. Skipping S3 upload.")
+                            return asset.cdn_url
+                        backoff = min(backoff * 2, 8)
+                    
+                    # Timeout waiting, try to re-reserve and upload ourselves
+                    status, registered = self.asset_registry.reserve_asset(checksum, worker_id=self.course_id, lease_secs=300)
+                    if status == "COMPLETED" and registered:
+                        return registered.cdn_url
+            except Exception as e:
+                logger.warning(f"Failed to check global asset registry for {filename}: {e}")
+
+        # Transition status to UPLOADING if we reserved it
+        if checksum:
+            try:
+                self.asset_registry.start_upload(checksum, self.course_id, lease_secs=300)
+            except Exception as e:
+                logger.warning(f"Failed to set status to UPLOADING in asset registry: {e}")
+
+        if not s3_key:
+            timestamp = int(time.time() * 1000)
+            name_part, ext_part = os.path.splitext(filename)
+            clean_name = _re.sub(r'[^\w\s.-]', '', name_part)
+            clean_name = _re.sub(r'[\s]+', '_', clean_name).strip('_')
+            ts_filename = f"{timestamp}_{clean_name}{ext_part}"
+            s3_key = S3_KEY_TEMPLATE.format(
+                institution=self.institution,
+                program=self.program_slug,
+                course_code=self.course_code,
+                module=module_slug or "assets",
+                content_type=content_type_folder or "assets",
+                filename=ts_filename,
+            )
         try:
             content_type = content_type_override or self._guess_content_type(local_path)
             from boto3.s3.transfer import TransferConfig
@@ -959,6 +1053,27 @@ class AssetUploader:
                 Config=transfer_config
             )
             final_url = f"{self.cdn_base_url}/{s3_key}" if self.cdn_base_url else f"https://{self.s3_bucket}.s3.amazonaws.com/{s3_key}"
+
+            # Post-upload verification (Transition to VERIFYING status)
+            if checksum:
+                try:
+                    self.asset_registry.start_verification(checksum, self.course_id, lease_secs=60)
+                    
+                    # Confirm object exists in S3
+                    self.s3_client.head_object(Bucket=self.s3_bucket, Key=s3_key)
+                    
+                    # Complete upload in registry
+                    size_bytes = local_path.stat().st_size
+                    self.asset_registry.complete_upload(
+                        checksum=checksum,
+                        s3_key=s3_key,
+                        cdn_url=final_url,
+                        size_bytes=size_bytes,
+                        mime_type=content_type
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to verify and register completed upload: {e}")
+
             self.stats["uploaded"] += 1
             return final_url
         except Exception as e:

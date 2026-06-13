@@ -1,0 +1,218 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for ULCP Ingestion & Promotion Queues, EventBridge, Auto Scaling, and Latency Alarms.'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: staging
+    AllowedValues: [staging, production]
+    Description: Environment name for resource tagging.
+  
+  ClusterName:
+    Type: String
+    Default: nextgen-lms-ecs-staging
+    Description: Name of the ECS cluster.
+  
+  IngestionServiceName:
+    Type: String
+    Default: service/nextgen-lms-ecs-staging/Content-Ingestion-staging-service
+    Description: Full resource path for the Ingestion ECS Service.
+
+Resources:
+  # Ingestion DLQ
+  IngestionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ulcp-ingestion-dlq-${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: ulcp
+
+  # Ingestion Jobs Queue
+  IngestionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ulcp-ingestion-jobs-${Environment}'
+      VisibilityTimeout: 300
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IngestionDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: ulcp
+
+  # Promotion DLQ (FIFO)
+  PromotionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ulcp-promotion-dlq-${Environment}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: ulcp
+
+  # Promotion Jobs Queue (FIFO)
+  PromotionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ulcp-promotion-jobs-${Environment}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PromotionDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: ulcp
+
+  # Ingestion Queue Policy (Allows EventBridge to send messages)
+  IngestionQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref IngestionQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Allow-EventBridge-SendMessage
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt IngestionQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt EventBridgeIngestionRule.Arn
+
+  # EventBridge Rule: Trigger Ingestion on S3 ObjectCreated
+  EventBridgeIngestionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub 'ulcp-s3-ingestion-rule-${Environment}'
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Sub 'nextgen-lms-ingest-${Environment}'
+          object:
+            key:
+              - suffix: .zip
+      State: ENABLED
+      Targets:
+        - Id: IngestionQueueTarget
+          Arn: !GetAtt IngestionQueue.Arn
+
+  # ECS Scalable Target for Auto Scaling Ingestion Service
+  IngestionScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: 0
+      ResourceId: !Ref IngestionServiceName
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # Ingestion Queue Depth Target Tracking Scaling Policy
+  IngestionScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ulcp-ingestion-backlog-tracking
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref IngestionScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 4.0  # Backlog target of 4 messages per task
+        ScaleOutCooldown: 30
+        ScaleInCooldown: 300
+        CustomizedMetricSpecification:
+          MetricName: ApproximateNumberOfMessagesVisible
+          Namespace: AWS/SQS
+          Dimensions:
+            - Name: QueueName
+              Value: !GetAtt IngestionQueue.QueueName
+          Statistic: Sum
+
+  # SNS Topic for Alarms
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'ulcp-alarm-notifications-${Environment}'
+
+  # CloudWatch Latency Alarm (ApproximateAgeOfOldestMessage > 300 seconds)
+  IngestionLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ulcp-ingestion-backlog-latency-alarm-${Environment}'
+      AlarmDescription: 'Triggers if ingestion backlog age exceeds 300 seconds (5 minutes).'
+      MetricName: ApproximateAgeOfOldestMessage
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt IngestionQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 300
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # CloudWatch Ingestion DLQ Alarm (Messages > 0)
+  IngestionDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ulcp-ingestion-dlq-alarm-${Environment}'
+      AlarmDescription: 'Triggers if there are messages in the ingestion DLQ.'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt IngestionDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # CloudWatch Promotion DLQ Alarm (Messages > 0)
+  PromotionDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ulcp-promotion-dlq-alarm-${Environment}'
+      AlarmDescription: 'Triggers if there are messages in the promotion DLQ.'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt PromotionDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+Outputs:
+  IngestionQueueUrl:
+    Value: !Ref IngestionQueue
+  PromotionQueueUrl:
+    Value: !Ref PromotionQueue
+  AlarmNotificationTopicArn:
+    Value: !Ref AlarmNotificationTopic

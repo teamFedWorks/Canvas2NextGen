@@ -32,7 +32,9 @@ class MigrationService:
         self.storage_dir = Path(os.getenv("STORAGE_DIR", "storage"))
         self.uploads_dir = self.storage_dir / "uploads"
         self.outputs_dir = self.storage_dir / "outputs"
-        self.db_uploader = MongoDBExporter()
+        mongo_uri = os.getenv("ULCP_MONGODB_URI")
+        db_name = os.getenv("ULCP_MONGODB_DATABASE", "test")
+        self.db_uploader = MongoDBExporter(mongodb_uri=mongo_uri, database_name=db_name)
         
         # Ensure directories exist
         self.uploads_dir.mkdir(parents=True, exist_ok=True)

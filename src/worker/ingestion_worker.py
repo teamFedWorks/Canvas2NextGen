@@ -30,7 +30,9 @@ class IngestionWorker:
     def __init__(self, s3_bucket: str, cdn_url: str):
         self.s3_bucket = s3_bucket
         self.cdn_url = cdn_url
-        self.exporter = MongoDBExporter()
+        mongo_uri = os.getenv("ULCP_MONGODB_URI")
+        db_name = os.getenv("ULCP_MONGODB_DATABASE", "test")
+        self.exporter = MongoDBExporter(mongodb_uri=mongo_uri, database_name=db_name)
         self.default_uni = os.getenv("DEFAULT_UNIVERSITY_ID", "default_univ")
         self.default_author = os.getenv("DEFAULT_AUTHOR_ID", "default_author")
         
@@ -154,12 +156,14 @@ class IngestionWorker:
         # If it's a zip source, we have a source_dir. If it's API, we might have remote URLs.
         source_dir = Path(canvas_course.source_directory) if hasattr(canvas_course, 'source_directory') else None
         
+        self.exporter._ensure_connection()
         uploader = AssetUploader(
             source_dir=source_dir, 
             s3_bucket=self.s3_bucket, 
             cdn_url=self.cdn_url,
             course_id=transformed_course.slug,
             institution=institution,
+            db_client=self.exporter._client
         )
         uploader.process_course_assets(transformed_course, canvas_course)
 

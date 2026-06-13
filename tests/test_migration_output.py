@@ -51,7 +51,7 @@ def test_transformation_structure():
     
     # 3. Simulate MongoDB Uploader conversion logic
     # We want to see the dictionary that goes into the DB
-    uploader = MongoDBExporter()
+    uploader = MongoDBExporter(mongodb_uri="mongodb://localhost:27017")
     
     # We'll monkeypatch or just call a helper if we had one, 
     # but let's just inspect what write_lms_course would do by looking at the logic.

@@ -124,7 +124,10 @@ class MigrationPipeline:
             
             # Stage 5: Database Write
             self._notify("exporting", 90, "Writing to MongoDB...")
-            db_writer = MongoDBExporter()
+            import os
+            mongo_uri = os.getenv("ULCP_MONGODB_URI")
+            db_name = os.getenv("ULCP_MONGODB_DATABASE", "test")
+            db_writer = MongoDBExporter(mongodb_uri=mongo_uri, database_name=db_name)
             
             from dataclasses import asdict
             course_dict = asdict(lms_course)
