@@ -23,6 +23,12 @@ from observability.logger import get_logger
 
 logger = get_logger(__name__)
 
+def to_object_id(value: Any, field_name: str) -> bson.ObjectId:
+    raw_value = str(value or "").strip()
+    if not raw_value or not bson.ObjectId.is_valid(raw_value):
+        raise ValueError(f"{field_name} must be a valid MongoDB ObjectId. Received: {value!r}")
+    return bson.ObjectId(raw_value)
+
 
 class ChunkedMongoExporter:
     """
@@ -106,10 +112,13 @@ class ChunkedMongoExporter:
         
         # 1. Export base course document (metadata only)
         course_doc = self._canonical_to_dict(canonical)
+        university_oid = to_object_id(university_id, "course.university")
+        author_oid = to_object_id(author_id, "course.authorId")
         course_doc.update({
             "slug": course_slug,
-            "universityId": university_id,
-            "authorId": author_id,
+            "university": university_oid,
+            "universityId": str(university_oid),
+            "authorId": author_oid,
             "status": "published",
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow(),
@@ -122,11 +131,11 @@ class ChunkedMongoExporter:
         
         # Upsert
         result = self._db['courses'].replace_one(
-            {"slug": course_slug},
+            {"slug": course_slug, "university": university_oid},
             course_doc,
             upsert=True
         )
-        course_id = result.upserted_id or self._db['courses'].find_one({"slug": course_slug})["_id"]
+        course_id = result.upserted_id or self._db['courses'].find_one({"slug": course_slug, "university": university_oid})["_id"]
         
         # 2. Export modules
         for module in canonical.modules:
@@ -247,14 +256,18 @@ class MongoDBExporter(ChunkedMongoExporter):
         """
         Legacy export method - converts dict to canonical and exports.
         """
+        university_oid = to_object_id(course_data.get("university"), "course.university")
+        author_oid = to_object_id(course_data.get("authorId"), "course.authorId")
+
         # Extract key fields for course document
         course_doc = {
             "slug": course_data.get("slug"),
             "title": course_data.get("title"),
             "description": course_data.get("description", ""),
-            "universityId": course_data.get("university"),
-            "authorId": course_data.get("authorId"),
-            "status": "published",
+            "university": university_oid,
+            "universityId": str(university_oid),
+            "authorId": author_oid,
+            "status": "Draft",
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow(),
         }
@@ -270,12 +283,12 @@ class MongoDBExporter(ChunkedMongoExporter):
         
         # Standard export
         result = self._db['courses'].replace_one(
-            {"slug": course_doc["slug"]},
+            {"slug": course_doc["slug"], "university": university_oid},
             course_doc,
             upsert=True
         )
         
-        course_id = result.upserted_id or self._db['courses'].find_one({"slug": course_doc["slug"]})["_id"]
+        course_id = result.upserted_id or self._db['courses'].find_one({"slug": course_doc["slug"], "university": university_oid})["_id"]
         
         # Export modules separately
         if "curriculum" in course_data:
@@ -290,21 +303,25 @@ class MongoDBExporter(ChunkedMongoExporter):
     
     def _export_legacy_chunked(self, course_data: Dict[str, Any]) -> str:
         """Fallback chunked export for large legacy documents."""
+        university_oid = to_object_id(course_data.get("university"), "course.university")
+        author_oid = to_object_id(course_data.get("authorId"), "course.authorId")
+
         course_doc = {
             "slug": course_data.get("slug"),
             "title": course_data.get("title"),
             "description": course_data.get("description", ""),
-            "universityId": course_data.get("university"),
-            "authorId": course_data.get("authorId"),
-            "status": "published",
+            "university": university_oid,
+            "universityId": str(university_oid),
+            "authorId": author_oid,
+            "status": "Draft",
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow(),
         }
         
         result = self._db['courses'].replace_one(
-            {"slug": course_doc["slug"]},
+            {"slug": course_doc["slug"], "university": university_oid},
             course_doc,
             upsert=True
         )
         
-        return str(result.upserted_id or self._db['courses'].find_one({"slug": course_doc["slug"]})["_id"])
+        return str(result.upserted_id or self._db['courses'].find_one({"slug": course_doc["slug"], "university": university_oid})["_id"])

@@ -105,118 +105,12 @@ class CourseTransformer:
                 discussions_map, weblinks_map, report
             )
             if lms_item:
-                lms_module.items.append(lms_item)
-
-        return lms_module
-
-    def _transform_item(
-        self, 
-        c_item: CanvasModuleItem,
-        pages_map: Dict[str, CanvasPage],
-        quizzes_map: Dict[str, CanvasQuiz],
-        assignments_map: Dict[str, CanvasAssignment],
-        discussions_map: Dict[str, CanvasDiscussion],
-        weblinks_map: Dict[str, CanvasWebLink],
-        report: TransformationReport
-    ) -> Optional[LmsCurriculumItem]:
-        """Maps a Canvas module item to a unified LmsCurriculumItem."""
-        base_item = LmsCurriculumItem(
-            title=c_item.title,
-            slug=self._slugify(c_item.title),
-            _canvasId=c_item.identifier,
-            type="Lesson"
-        )
-
-        # Use _content_ref (the resource identifierref) for content lookup.
-
-logger = get_logger(__name__)
-
-
-class CourseTransformer:
-    """
-    Transforms parsed Canvas data into the custom LMS domain models.
-    Ensures alignment with the backend's nested database schema.
-    """
-
-    def transform(
-        self, 
-        canvas_course: CanvasCourse, 
-        university_id: Optional[str] = None, 
-        author_id: Optional[str] = None,
-        course_code: Optional[str] = None,
-        department: Optional[str] = None
-    ) -> tuple[LmsCourse, TransformationReport]:
-        """
-        Orchestrates transformation from CanvasCourse to LmsCourse.
-        """
-        report = TransformationReport()
-        logger.info("[CourseTransformer] Starting transformation", extra={"course": canvas_course.title})
-
-        slug = self._slugify(canvas_course.title)
-        import os
-        lms_course = LmsCourse(
-            university=university_id or os.getenv("DEFAULT_UNIVERSITY_ID", "000000000000000000000000"),
-            authorId=author_id or os.getenv("DEFAULT_AUTHOR_ID", "000000000000000000000000"),
-            authorName="Admin",
-            title=canvas_course.title,
-            slug=slug,
-            courseUrl=slug,
-            courseCode=course_code or "IMPORTED",
-            department=department or "Imported",
-            shortDescription=f"{canvas_course.title} — imported from Canvas LMS",
-            description=f"Imported Course: {canvas_course.title}",
-            canvas_course_id=canvas_course.identifier
-        )
-
-        # Build lookup maps for fast access to content items.
-        # Key = identifier used when the content was parsed.
-        # Pages are keyed by their stem (filename without extension) from wiki_content/
-        # Quizzes and assignments are keyed by their directory name.
-        # Discussions and weblinks are keyed by their resource identifier (set in parser.py).
-        pages_map = {p.identifier: p for p in canvas_course.pages}
-        quizzes_map = {q.identifier: q for q in canvas_course.quizzes}
-        assignments_map = {a.identifier: a for a in canvas_course.assignments}
-        discussions_map = {d.identifier: d for d in canvas_course.discussions}
-        weblinks_map = {w.identifier: w for w in canvas_course.weblinks}
-
-        # Process Modules
-        for c_module in canvas_course.modules:
-            lms_module = self._transform_module(
-                c_module, pages_map, quizzes_map, assignments_map,
-                discussions_map, weblinks_map, report
-            )
-            lms_course.curriculum.append(lms_module)
-
-        logger.info("[CourseTransformer] Transformation complete", extra={
-            "modules": len(lms_course.curriculum),
-            "errors": len(report.errors)
-        })
-
-        return lms_course, report
-
-    def _transform_module(
-        self, 
-        c_module: CanvasModule, 
-        pages_map: Dict[str, CanvasPage],
-        quizzes_map: Dict[str, CanvasQuiz],
-        assignments_map: Dict[str, CanvasAssignment],
-        discussions_map: Dict[str, CanvasDiscussion],
-        weblinks_map: Dict[str, CanvasWebLink],
-        report: TransformationReport
-    ) -> LmsCurriculumModule:
-        """Transforms a Canvas module to a curriculum module."""
-        lms_module = LmsCurriculumModule(
-            title=c_module.title,
-            summary="",
-            _canvasId=c_module.identifier
-        )
-
-        for item in c_module.items:
-            lms_item = self._transform_item(
-                item, pages_map, quizzes_map, assignments_map,
-                discussions_map, weblinks_map, report
-            )
-            if lms_item:
+                # Omit empty/blank items to ensure clean rendering
+                is_empty_subheader = (lms_item.type == "SubHeader" and not (lms_item.content or "").strip())
+                is_empty_lesson = (lms_item.type == "Lesson" and not (lms_item.content or "").strip() and not getattr(lms_item, "videoUrl", None) and not getattr(item, "content_file", None))
+                if is_empty_subheader or is_empty_lesson:
+                    logger.info(f"[CourseTransformer] Skipping empty placeholder/subheader item: {lms_item.title}")
+                    continue
                 lms_module.items.append(lms_item)
 
         return lms_module
@@ -247,14 +141,26 @@ class CourseTransformer:
         base_item._content_ref = lookup_key
 
         if not c_item.content_type:
-            logger.info("Skipping empty subheader/placeholder item", extra={"title": c_item.title})
-            return None
+            # Retain subheader/placeholder items to preserve the exact structure of the manifest (no gaps)
+            logger.info("Retaining empty subheader/placeholder item to match manifest structure", extra={"title": c_item.title})
+            base_item.content = ""
+            base_item.type = "SubHeader"
+            return base_item
 
         if c_item.content_type == 'page':
             page = pages_map.get(lookup_key)
             base_item.type = "Lesson"
 
             if page:
+                # Filter out private SharePoint links with no other content to prevent access issues
+                if "sharepoint.com" in page.body.lower():
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(page.body, "html.parser")
+                    text = soup.get_text(strip=True)
+                    if len(text) < 100:
+                        logger.info(f"[CourseTransformer] Skipping private SharePoint page to protect student journey: {c_item.title}")
+                        return None
+
                 cleaned_body, video_url = self._extract_and_strip_video(page.body)
                 base_item.content = normalize_lesson_content(cleaned_body, title=c_item.title)
                 if video_url:
@@ -369,7 +275,7 @@ class CourseTransformer:
 
         elif c_item.content_type == 'weblink':
             weblink = weblinks_map.get(lookup_key)
-            base_item.type = "Lesson"
+            base_item.type = "WebLink"
             if weblink:
                 base_item.content = (
                     f'<p><a href="{weblink.url}" target="_blank" rel="noopener noreferrer">'
@@ -377,9 +283,10 @@ class CourseTransformer:
                 )
             return base_item
 
-        elif c_item.content_type == 'external_tool':
-            # LTI / external tool — render as Lesson with description as content
-            base_item.type = "Lesson"
+        elif c_item.content_type in ('external_tool', 'lti'):
+            # LTI / external tool — stored as ExternalTool so the validator
+            # can correctly SKIP it (content lives on a third-party platform).
+            base_item.type = "ExternalTool"
             body = getattr(c_item, '_bb_body', '')
             if body:
                 base_item.content = normalize_lesson_content(body, title=c_item.title)

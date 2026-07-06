@@ -20,7 +20,7 @@ def serve_app(port: int = 5009):
     """Start the FastAPI server with uvicorn."""
     import uvicorn
     print(f"[serve] Starting EduvateHub Ingestion API on port {port}...")
-    print(f"[serve] Swagger UI → http://localhost:{port}/docs")
+    print(f"[serve] Swagger UI -> http://localhost:{port}/docs")
     uvicorn.run(
         "api.main:app",
         host="0.0.0.0",
@@ -51,7 +51,7 @@ def ingest_zip(
 
     zip_path = Path(path)
     if not zip_path.exists():
-        print(f"[ingest zip] ERROR: path does not exist → {zip_path}")
+        print(f"[ingest zip] ERROR: path does not exist -> {zip_path}")
         sys.exit(1)
 
     print(f"[ingest zip] Ingesting: {zip_path}")
@@ -115,31 +115,39 @@ def ingest_s3(
 
 
 def _ingest_s3_fallback(institution, program, course, university_id, author_id, force, dry_run, workers=4):
-    import boto3
+    import tempfile
+    import shutil
+    from utils.s3_utils import S3Downloader
     from worker.ingestion_worker import IngestionWorker
 
-    bucket = os.getenv("S3_INGESTION_BUCKET", "")
+    bucket = os.getenv("S3_INGESTION_BUCKET", "eduvatehub-courseshells-prod")
     cdn_url = os.getenv("CDN_URL", "")
-    cdn_bucket = os.getenv("S3_CDN_BUCKET", "")
-    region = os.getenv("AWS_REGION", "us-east-2")
+    cdn_bucket = os.getenv("S3_CDN_BUCKET", "uhub-lms-bucket")
 
-    s3 = boto3.client("s3", region_name=region)
-    prefix = f"{institution}/"
+    downloader = S3Downloader(bucket=bucket)
+
+    # Resolve the prefix
+    prefix = institution
+    if not prefix.startswith("Institutions/"):
+        prefix = f"Institutions/{prefix}"
+    if not prefix.endswith("/"):
+        prefix += "/"
+
     if program:
-        prefix += f"{program}/"
+        prefix += f"programs/{program}/courses/" if "SFC" in prefix else f"Programs/{program}/courses/"
     if course:
         prefix += f"{course}"
 
     print(f"[ingest s3] Listing s3://{bucket}/{prefix}")
-    paginator = s3.get_paginator("list_objects_v2")
-    keys = []
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            if obj["Key"].endswith(".zip"):
-                keys.append(obj["Key"])
+
+    try:
+        keys = downloader.list_courses(prefix=prefix, extensions=(".zip", ".imscc"))
+    except Exception as e:
+        print(f"[ingest s3] ERROR listing bucket: {e}")
+        return
 
     if not keys:
-        print("[ingest s3] No ZIP packages found.")
+        print(f"[ingest s3] No ZIP or IMSCC packages found under prefix: {prefix}")
         return
 
     print(f"[ingest s3] Found {len(keys)} package(s).")
@@ -149,20 +157,36 @@ def _ingest_s3_fallback(institution, program, course, university_id, author_id, 
         return
 
     worker = IngestionWorker(s3_bucket=cdn_bucket, cdn_url=cdn_url)
-    for key in keys:
-        print(f"[ingest s3] Processing: {key}")
-        result = worker.ingest(
-            source_type="zip",
-            payload={
-                "s3_key": key,
-                "s3_bucket": bucket,
-                "university_id": university_id or os.getenv("DEFAULT_UNIVERSITY_ID"),
-                "author_id": author_id or os.getenv("DEFAULT_AUTHOR_ID"),
-                "institution": institution,
-                "force": force,
-            },
-        )
-        _print_result(result)
+
+    # Create a temporary directory to download the packages
+    temp_dir = Path(tempfile.mkdtemp(prefix="s3_ingestion_"))
+    try:
+        for key in keys:
+            print(f"\n[ingest s3] Processing: {key}")
+            try:
+                # Download to temp_dir
+                local_path = downloader.download(key, temp_dir)
+
+                result = worker.ingest(
+                    source_type="zip",
+                    payload={
+                        "zip_path": local_path,
+                        "university_id": university_id or os.getenv("DEFAULT_UNIVERSITY_ID"),
+                        "author_id": author_id or os.getenv("DEFAULT_AUTHOR_ID"),
+                        "institution": "WBU" if "WBU" in key else "SFC",
+                        "force": force,
+                    },
+                )
+                _print_result(result)
+
+                # Cleanup downloaded file immediately to save disk space
+                if local_path.exists():
+                    local_path.unlink()
+            except Exception as e:
+                print(f"  [FAIL] Failed to ingest {key}: {e}")
+    finally:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -243,15 +267,29 @@ def ingest_batch(uploads_root: str, force: bool = False, dry_run: bool = False, 
 
     for zip_path in zips:
         print(f"\n[ingest batch] -> {zip_path.name}")
+        
+        # Derive program name from path segments: the folder right after SFC or WBU
+        parts = zip_path.parts
+        program_name = None
+        for i, part in enumerate(parts):
+            if part in ("SFC", "WBU") and i + 1 < len(parts) - 1:
+                program_name = parts[i + 1]
+                break
+            
+        payload = {
+            "zip_path": zip_path,
+            "university_id": os.getenv("DEFAULT_UNIVERSITY_ID"),
+            "author_id":   os.getenv("DEFAULT_AUTHOR_ID"),
+            "institution": institution,
+            "force": force,
+        }
+        if program_name:
+            payload["program_name"] = program_name
+            print(f"  Program Name: {program_name}")
+
         result = worker.ingest(
             source_type="zip",
-            payload={
-                "zip_path": zip_path,
-                "university_id": os.getenv("DEFAULT_UNIVERSITY_ID"),
-                "author_id":   os.getenv("DEFAULT_AUTHOR_ID"),
-                "institution": institution,
-                "force": force,
-            },
+            payload=payload,
         )
         _print_result(result)
 
@@ -271,7 +309,7 @@ def validate_course(course_id: str | None, slug: str | None, strict: bool = Fals
     report = run_validation(identifier, by_slug=by_slug, strict=strict)
     out_dir = ROOT / "storage" / "outputs"
     html_path = save_report(report, out_dir, emit_json=True)
-    print(f"[validate] Report saved → {html_path}")
+    print(f"[validate] Report saved -> {html_path}")
     print(f"[validate] Verdict: {report.verdict_label}")
 
     if strict and report.has_failures:

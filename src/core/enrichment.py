@@ -23,6 +23,13 @@ from observability.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _has_word(kw: str, text: str) -> bool:
+    """Check if a keyword exists in text as a whole word (word boundaries)."""
+    if not text:
+        return False
+    return bool(re.search(rf"\b{re.escape(kw)}\b", text, re.IGNORECASE))
+
+
 @dataclass
 class EnrichmentResult:
     """Result of enrichment operation."""
@@ -255,34 +262,34 @@ class ContentEnricher:
                     title_lower = (item.title or "").lower()
                     
                     # Policy
-                    if any(kw in title_lower for kw in ["syllabus", "policy", "rules", "guideline", "honor code", "compliance"]):
+                    if any(_has_word(kw, title_lower) for kw in ["syllabus", "policy", "rules", "guideline", "honor code", "compliance"]):
                         item.content_type = CanonicalContentType.POLICY
                     
                     # Announcement (often stored as discussions in Canvas)
-                    elif any(kw in title_lower for kw in ["announcement", "welcome", "important notice", "update", "week ", "reminder", "posted"]):
+                    elif any(_has_word(kw, title_lower) for kw in ["announcement", "welcome", "important notice", "update", "week ", "reminder", "posted"]):
                         item.content_type = CanonicalContentType.ANNOUNCEMENT
 
                     # Reading (instructional documents) — HIGHER PRIORITY so that
                     # guides, templates, samples, examples, and annotated bibliographies
                     # are classified as Reading rather than being caught by the
                     # broader resource bucket below.
-                    elif any(kw in title_lower for kw in ["textbook", "reading", "chapter", "article", "paper", "book", "manual", "guide", "template", "sample", "example", "steps for", "writing guide", "annotated bibliography"]) or (title_lower.endswith(".pdf") and not any(kw in title_lower for kw in ["practice", "solution", "exam", "quiz", "assignment"])):
+                    elif any(_has_word(kw, title_lower) for kw in ["textbook", "reading", "chapter", "article", "paper", "book", "manual", "guide", "template", "sample", "example", "steps for", "writing guide", "annotated bibliography"]) or (title_lower.endswith(".pdf") and not any(_has_word(kw, title_lower) for kw in ["practice", "solution", "exam", "quiz", "assignment"])):
                         item.content_type = CanonicalContentType.READING
                     
                     # Resource (supporting materials) - HIGH PRIORITY for practical materials
-                    elif any(kw in title_lower for kw in ["resource", "support", "help", "tutorial", "uploading", "faq", "practice", "solution", "materials", "handout", "extra credit", "prep", "dataset", "csv", "ipynb", "exercise", "lab", "answer"]):
+                    elif any(_has_word(kw, title_lower) for kw in ["resource", "support", "help", "tutorial", "uploading", "faq", "practice", "solution", "materials", "handout", "extra credit", "prep", "dataset", "csv", "ipynb", "exercise", "lab", "answer"]):
                         item.content_type = CanonicalContentType.RESOURCE
                     
                     # Live Session / Media
-                    elif any(kw in title_lower for kw in ["zoom", "webinar", "live session", "video", "recording", "meeting", "presentation", "lecture"]) or title_lower.endswith((".mp4", ".mov", ".avi", ".pptx", ".ppt", ".key")):
+                    elif any(_has_word(kw, title_lower) for kw in ["zoom", "webinar", "live session", "video", "recording", "meeting", "presentation", "lecture"]) or title_lower.endswith((".mp4", ".mov", ".avi", ".pptx", ".ppt", ".key")):
                         item.content_type = CanonicalContentType.LIVE_SESSION
                     
                     # Survey
-                    elif any(kw in title_lower for kw in ["survey", "evaluation", "feedback", "poll"]):
+                    elif any(_has_word(kw, title_lower) for kw in ["survey", "evaluation", "feedback", "poll"]):
                         item.content_type = CanonicalContentType.SURVEY
                     
                     # External Tool
-                    elif any(kw in title_lower for kw in ["lti", "turnitin", "external tool", "launch", "tool", "plugin"]):
+                    elif any(_has_word(kw, title_lower) for kw in ["lti", "turnitin", "external tool", "launch", "tool", "plugin"]):
                         item.content_type = CanonicalContentType.EXTERNAL_TOOL
                     
                     # Default to RESOURCE for WebLinks if not matched
@@ -636,24 +643,8 @@ class LmsCourseEnricher:
         title_lower = title.lower()
         content_lower = (item.content or "").lower()
 
-        # ── Layer 0: structural type correction ───────────────────────────
-        # Blackboard and some Canvas exports catalogue submission portals and
-        # assignment prompts as Quiz items.  Detect and correct these before
-        # any other logic runs.
+        # Preserve structural types from the manifest
         if item.type == "Quiz":
-            corrected = self._correct_quiz_misclassification(title_lower, content_lower, item)
-            if corrected:
-                item.type, item.instructionalType, item.classificationConfidence = corrected
-                item.interactionLevel = self._INTERACTION.get(item.type, "active")
-                item.estimatedDuration = self._estimate_duration(item)
-                item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
-                # Map other types to Lesson
-                if item.type not in ["Lesson", "Quiz", "Assignment", "Discussion"]:
-                    item.type = "Lesson"
-                self._extract_video_links(item)
-                return  # fully handled
-
-            # Genuine quiz — mark as structurally certain
             item.classificationConfidence = 1.0
             item.instructionalType = "assessment"
             item.interactionLevel = "active"
@@ -669,33 +660,44 @@ class LmsCourseEnricher:
             item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
             return
 
-        # ── Layer 1: unambiguous title-pattern match ──────────────────────
-        for pattern, ctype, itype, conf in self._PATTERN_RULES:
-            if pattern.search(title_lower):
-                item.type = ctype
-                item.instructionalType = itype
-                item.classificationConfidence = conf
-                item.interactionLevel = self._INTERACTION.get(ctype, "passive")
-                item.estimatedDuration = self._estimate_duration(item)
-                item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
-                # Map other types to Lesson
-                if item.type not in ["Lesson", "Quiz", "Assignment", "Discussion"]:
-                    item.type = "Lesson"
-                self._extract_video_links(item)
-                return
+        if item.type == "Discussion":
+            item.classificationConfidence = 1.0
+            item.instructionalType = "discussion_prompt"
+            item.interactionLevel = "active"
+            item.estimatedDuration = self._estimate_duration(item)
+            item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
+            return
 
-        # ── Layer 2 + 3: keyword scoring on title + content body ──────────
-        item.type, item.classificationConfidence = self._classify_by_keywords(
-            title_lower, content_lower, item
-        )
-        item.instructionalType = self._instructional_type(title_lower, item.type)
-        item.interactionLevel = self._INTERACTION.get(item.type, "passive")
-        item.estimatedDuration = self._estimate_duration(item)
-        item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
-        # Map other types to Lesson
-        if item.type not in ["Lesson", "Quiz", "Assignment", "Discussion"]:
-            item.type = "Lesson"
-        self._extract_video_links(item)
+        if item.type == "SubHeader":
+            item.classificationConfidence = 1.0
+            item.instructionalType = "subheader"
+            item.interactionLevel = "passive"
+            item.estimatedDuration = 0
+            return
+
+        if item.type == "WebLink":
+            item.classificationConfidence = 1.0
+            item.instructionalType = "weblink"
+            item.interactionLevel = "passive"
+            item.estimatedDuration = 5
+            return
+
+        if item.type == "ExternalTool":
+            item.classificationConfidence = 1.0
+            item.instructionalType = "external_tool"
+            item.interactionLevel = "active"
+            item.estimatedDuration = 10
+            return
+
+        if item.type == "Lesson":
+            # Pages are Lessons. Keep them as Lesson, but compute metadata using heuristics
+            item.classificationConfidence = 1.0
+            item.instructionalType = self._instructional_type(title_lower, "Lesson")
+            item.interactionLevel = "passive"
+            item.estimatedDuration = self._estimate_duration(item)
+            item.learningOutcomes = self._extract_outcomes(title_lower, content_lower)
+            self._extract_video_links(item)
+            return
 
     def _extract_video_links(self, item: "LmsCurriculumItem") -> None:
         """Extract Zoom or YuJa video URL from content if present and set videoUrl."""
@@ -791,22 +793,25 @@ class LmsCourseEnricher:
         """
 
         def _score(kws: List[str], base: float, body_kws: List[str] = None) -> float:
-            title_hits = sum(1 for kw in kws if kw in title_lower)
+            title_hits = sum(1 for kw in kws if _has_word(kw, title_lower))
             if title_hits == 0:
                 return 0.0
             conf = min(0.95, base + 0.05 * (title_hits - 1))
             if body_kws:
-                body_hits = sum(1 for kw in body_kws if kw in content_lower)
+                body_hits = sum(1 for kw in body_kws if _has_word(kw, content_lower))
                 if body_hits:
                     conf = min(0.95, conf + 0.05)
             return conf
+
+        live_exts = (".mp4", ".mov", ".avi", ".pptx", ".ppt", ".key")
 
         # ── Policy ────────────────────────────────────────────────────────
         policy_kws = ["syllabus", "policy", "rules", "guideline", "honor code",
                       "compliance", "code of conduct", "academic integrity"]
         policy_body = ["academic integrity", "plagiarism", "grading policy",
                        "late work", "attendance", "course expectations"]
-        c = _score(policy_kws, 0.85, policy_body)
+        is_explicit_discussion = "discussion" in title_lower or "forum" in title_lower or "dialog" in title_lower or "dialogue" in title_lower
+        c = 0.0 if is_explicit_discussion else _score(policy_kws, 0.85, policy_body)
         if c:
             return "Policy", c
 
@@ -815,7 +820,18 @@ class LmsCourseEnricher:
                     "response", "replies", "introductions", "introduce yourself"]
         disc_body = ["respond to", "reply to", "post your", "classmates",
                      "peer response", "discussion board", "initial post"]
-        c = _score(disc_kws, 0.80, disc_body)
+        
+        # Avoid misclassifying media files, lectures, slides, resources, readings, policy documents as Discussion
+        non_discussion_signals = [
+            "slides", "slide", "resource", "materials", "material", "handout",
+            "reading", "textbook", "chapter", "article", "paper", "syllabus",
+            "policy", "rules", "guidelines", "compliance", "lecture", "video"
+        ]
+        is_explicit_discussion = "discussion" in title_lower or "forum" in title_lower or "dialog" in title_lower or "dialogue" in title_lower
+        is_non_discussion = any(sig in title_lower for sig in non_discussion_signals) or title_lower.endswith(live_exts)
+        bypass_discussion = is_non_discussion and not is_explicit_discussion
+
+        c = 0.0 if bypass_discussion else _score(disc_kws, 0.80, disc_body)
         if c:
             return "Discussion", c
 
@@ -856,7 +872,6 @@ class LmsCourseEnricher:
         # ── Live session / media ──────────────────────────────────────────
         live_kws = ["zoom", "webinar", "live session", "video", "recording",
                     "meeting", "presentation", "lecture"]
-        live_exts = (".mp4", ".mov", ".avi", ".pptx", ".ppt", ".key")
         # "Video: How to..." prefix is a strong LiveSession signal
         if title_lower.startswith("video:") or title_lower.startswith("video -"):
             return "LiveSession", 0.90

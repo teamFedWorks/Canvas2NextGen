@@ -39,6 +39,7 @@ def test_existing_html_stays_html_and_is_sanitized():
     assert "<h2>Hello</h2>" in html
     assert "<p>World-ok</p>" in html
     assert "<script>" not in html
+    assert "alert(1)" not in html
 
 
 def test_bullets_split_into_lists():

@@ -182,7 +182,7 @@ def validate_structure(course: Dict) -> List[CheckResult]:
         "title":            "Course Title",
         "slug":             "URL Slug",
         "courseUrl":        "Course URL",
-        "university":       "University ID",
+        "university":       "University",
         "authorId":         "Author / Instructor ID",
         "curriculum":       "Curriculum (modules list)",
         "status":           "Publication Status",
@@ -192,14 +192,24 @@ def validate_structure(course: Dict) -> List[CheckResult]:
     out = []
     for f, label in fields.items():
         val = course.get(f)
-        empty = val is None or val=="" or val==[]
-        out.append(CheckResult(
-            name=label,
-            status=Status.FAIL if empty else Status.PASS,
-            value="MISSING" if empty else (f"{len(val)} module(s)" if isinstance(val,list) else str(val)[:90]),
-            why="Required field — course cannot display correctly without it." if empty else "",
-            action=f"Populate the '{f}' field before publishing." if empty else ""
-        ))
+        if f == "university":
+            valid = bool(val) and bson.ObjectId.is_valid(str(val))
+            out.append(CheckResult(
+                name=label,
+                status=Status.PASS if valid else Status.FAIL,
+                value=str(val)[:90] if val else "MISSING",
+                why="" if valid else "Course university must be a valid ObjectId; empty strings break platform populate().",
+                action="" if valid else "Set a valid university ObjectId before exporting."
+            ))
+        else:
+            empty = val is None or val=="" or val==[]
+            out.append(CheckResult(
+                name=label,
+                status=Status.FAIL if empty else Status.PASS,
+                value="MISSING" if empty else (f"{len(val)} module(s)" if isinstance(val,list) else str(val)[:90]),
+                why="Required field — course cannot display correctly without it." if empty else "",
+                action=f"Populate the '{f}' field before publishing." if empty else ""
+            ))
     return out
 
 # ── Fix 2: Navigation placeholder patterns ────────────────────────────────────
@@ -706,14 +716,12 @@ def _mapping_summary(r: ValidationReport) -> str:
     Build the Course Mapping Status section — a visual table showing
     every Canvas content type and how it mapped into the LMS.
     """
-    # Count by type across all modules — Fix 2: exclude SKIP items from coverage
     import collections
     counts = collections.defaultdict(lambda: [0, 0])
-    # [pass_count, warn_count]
     for m in r.module_results:
         for i in m.items:
             if i.status == Status.SKIP:
-                continue  # nav placeholders don't count toward accuracy
+                continue
             key = i.item_type
             if i.status == Status.PASS:
                 counts[key][0] += 1
@@ -740,7 +748,6 @@ def _mapping_summary(r: ValidationReport) -> str:
         "Other":      ("misc types",                      "LMS Generic Item"),
     }
     
-    # Ensure any unexpected types fall back to "Other" but get printed
     for k in list(counts.keys()):
         if k not in canvas_types:
             canvas_types[k] = ("unknown / unmapped", f"LMS Custom Type ({k})")
@@ -753,176 +760,216 @@ def _mapping_summary(r: ValidationReport) -> str:
             continue
         bar_pct = round(p / total * 100) if total else 0
         status_cell = (
-            f'<span style="background:#e8f5e9;color:#2e7d32;border:1px solid #2e7d32;'
-            f'padding:2px 8px;border-radius:6px;font-size:0.78em;font-weight:700">PASS</span>'
+            f'<span style="background:#ecfdf5;color:#047857;border:1px solid #10b98130;'
+            f'padding:3px 10px;border-radius:100px;font-size:0.75em;font-weight:700;display:inline-flex;align-items:center;gap:4px">✅ Passed</span>'
             if w == 0 else
-            f'<span style="background:#fffde7;color:#f57f17;border:1px solid #f57f17;'
-            f'padding:2px 8px;border-radius:6px;font-size:0.78em;font-weight:700">'
-            f'{w} item(s) need attention</span>'
+            f'<span style="background:#fffbeb;color:#b45309;border:1px solid #f59e0b30;'
+            f'padding:3px 10px;border-radius:100px;font-size:0.75em;font-weight:700;display:inline-flex;align-items:center;gap:4px">⚠️ {w} need review</span>'
         )
         bar = (
-            f'<div style="background:#e0e0e0;border-radius:4px;height:8px;width:120px;'
-            f'display:inline-block;vertical-align:middle;margin-right:6px">'
-            f'<div style="background:#2e7d32;width:{bar_pct}%;height:100%;border-radius:4px"></div></div>'
-            f'<span style="font-size:0.8em;color:#555">{p}/{total} mapped ({bar_pct}%)</span>'
+            f'<div style="background:#f1f5f9;border-radius:100px;height:8px;width:120px;'
+            f'display:inline-block;vertical-align:middle;margin-right:8px;overflow:hidden">'
+            f'<div style="background:#10b981;width:{bar_pct}%;height:100%"></div></div>'
+            f'<span style="font-size:0.82em;color:#475569;font-weight:500">{p}/{total} ({bar_pct}%)</span>'
         )
         rows += (
             f"<tr>"
-            f"<td style='font-weight:600;color:#1a1a2e'>{lms_type}</td>"
-            f"<td style='font-size:0.82em;color:#555'>{canvas_src}</td>"
-            f"<td style='font-size:0.82em;color:#1565c0'>{lms_dest}</td>"
-            f"<td>{bar}</td>"
-            f"<td>{status_cell}</td>"
+            f"<td style='font-weight:600;color:#0f172a;padding:12px 16px;'>{lms_type}</td>"
+            f"<td style='font-size:0.85em;color:#475569;padding:12px 16px;'>{canvas_src}</td>"
+            f"<td style='font-size:0.85em;color:#2563eb;font-weight:500;padding:12px 16px;'>{lms_dest}</td>"
+            f"<td style='padding:12px 16px;'>{bar}</td>"
+            f"<td style='padding:12px 16px;'>{status_cell}</td>"
             f"</tr>"
         )
 
     overall_bar = (
-        f'<div style="background:#e0e0e0;border-radius:6px;height:12px;width:100%;margin:8px 0">'
-        f'<div style="background:{"#2e7d32" if pct==100 else "#f57f17"};'
-        f'width:{pct}%;height:100%;border-radius:6px;transition:width .3s"></div></div>'
+        f'<div style="background:#e2e8f0;border-radius:100px;height:12px;width:100%;margin:12px 0;overflow:hidden">'
+        f'<div style="background:{"#10b981" if pct==100 else "#f59e0b"};'
+        f'width:{pct}%;height:100%;transition:width .3s"></div></div>'
     )
-    overall_color = "#2e7d32" if pct == 100 else "#e65100"
+    overall_color = "#10b981" if pct == 100 else "#d97706"
 
     return f"""
-    <div style="background:#fff;border-radius:8px;padding:20px 24px;
-                box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="background:#fff;border-radius:16px;padding:28px;border:1px solid #e2e8f0;
+                box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);margin-bottom:32px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div>
-            <div style="font-size:1em;font-weight:700;color:#1a1a2e">
-              Overall Mapping Coverage
+            <div style="font-size:1.15em;font-weight:700;color:#0f172a">
+              Course Mapping Coverage
             </div>
-            <div style="font-size:0.82em;color:#666;margin-top:2px">
-              {total_pass} of {total_items} content items successfully mapped from source to LMS
+            <div style="font-size:0.85em;color:#475569;margin-top:2px">
+              {total_pass} of {total_items} content items successfully mapped from Canvas source to LMS
             </div>
         </div>
         <div style="font-size:2.4em;font-weight:800;color:{overall_color}">{pct}%</div>
       </div>
       {overall_bar}
-      <table style="width:100%;border-collapse:collapse;font-size:0.88em;margin-top:16px">
+      <table style="width:100%;border-collapse:collapse;font-size:0.9em;margin-top:16px">
         <thead>
-          <tr style="background:#f5f5f5">
-            <th style="padding:8px 12px;text-align:left;font-weight:600;border-bottom:2px solid #ddd;font-size:0.83em;text-transform:uppercase;letter-spacing:.03em">LMS Content Type</th>
-            <th style="padding:8px 12px;text-align:left;font-weight:600;border-bottom:2px solid #ddd;font-size:0.83em;text-transform:uppercase;letter-spacing:.03em">Source Format</th>
-            <th style="padding:8px 12px;text-align:left;font-weight:600;border-bottom:2px solid #ddd;font-size:0.83em;text-transform:uppercase;letter-spacing:.03em">Mapped To</th>
-            <th style="padding:8px 12px;text-align:left;font-weight:600;border-bottom:2px solid #ddd;font-size:0.83em;text-transform:uppercase;letter-spacing:.03em">Coverage</th>
-            <th style="padding:8px 12px;text-align:left;font-weight:600;border-bottom:2px solid #ddd;font-size:0.83em;text-transform:uppercase;letter-spacing:.03em">Mapping Status</th>
+          <tr style="background:#f8fafc">
+            <th style="padding:10px 16px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:0.8em;text-transform:uppercase;color:#475569">LMS Content Type</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:0.8em;text-transform:uppercase;color:#475569">Source Format</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:0.8em;text-transform:uppercase;color:#475569">Mapped To</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:0.8em;text-transform:uppercase;color:#475569">Coverage</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;font-size:0.8em;text-transform:uppercase;color:#475569">Mapping Status</th>
           </tr>
         </thead>
-        <tbody>{rows}</tbody>
+        <tbody class="mapping-table-body">{rows}</tbody>
       </table>
     </div>"""
 
 
 def generate_html(r: ValidationReport) -> str:
-    vc = {"PASS":"#2e7d32","FAIL":"#c62828","WARN":"#e65100"}.get(r.verdict.value,"#555")
+    vc = {"PASS":"#10b981","FAIL":"#ef4444","WARN":"#f59e0b"}.get(r.verdict.value,"#64748b")
+    vc_bg = {"PASS":"#f0fdf4","FAIL":"#fef2f2","WARN":"#fffbeb"}.get(r.verdict.value,"#f8fafc")
+    vc_fg = {"PASS":"#166534","FAIL":"#991b1b","WARN":"#9a3412"}.get(r.verdict.value,"#1e293b")
+
+    verdict_badge_text = {"PASS":"Ingestion Verified & Clean","FAIL":"Critical Issues Detected","WARN":"Manual Review Required"}.get(r.verdict.value,"Under Review")
 
     def badge(s: Status, label=None) -> str:
-        bg = {"PASS":"#e8f5e9","FAIL":"#ffebee","RETRY":"#fff3e0","WARN":"#fffde7","SKIP":"#f5f5f5"}
-        fg = {"PASS":"#2e7d32","FAIL":"#c62828","RETRY":"#e65100","WARN":"#f57f17","SKIP":"#757575"}
-        b,f = bg.get(s.value,"#f5f5f5"), fg.get(s.value,"#555")
+        bg = {"PASS":"#ecfdf4","FAIL":"#fef2f2","RETRY":"#fff7ed","WARN":"#fffbeb","SKIP":"#f8fafc"}
+        fg = {"PASS":"#15803d","FAIL":"#b91c1c","RETRY":"#c2410c","WARN":"#b45309","SKIP":"#475569"}
+        border = {"PASS":"#10b98130","FAIL":"#f43f5e30","RETRY":"#f9731630","WARN":"#f59e0b30","SKIP":"#cbd5e1"}
+        b,f,bd = bg.get(s.value,"#f8fafc"), fg.get(s.value,"#475569"), border.get(s.value,"#cbd5e1")
         txt = label or s.value
-        return (f'<span style="background:{b};color:{f};border:1px solid {f};'
-                f'padding:3px 10px;border-radius:10px;font-size:0.78em;font-weight:700;white-space:nowrap">'
-                f'{txt}</span>')
+        icon = {"PASS":"✅","FAIL":"🛑","RETRY":"🔄","WARN":"⚠️","SKIP":"ℹ️"}.get(s.value,"")
+        return (f'<span style="background:{b};color:{f};border:1px solid {bd};'
+                f'padding:4px 10px;border-radius:100px;font-size:0.75em;font-weight:700;white-space:nowrap;'
+                f'display:inline-flex;align-items:center;gap:4px">'
+                f'{icon} {txt}</span>')
 
     def tooltip(text: str) -> str:
         if not text: return ""
         safe = text.replace('"','&quot;').replace("'","&#39;")
-        return (f'<span title="{safe}" style="cursor:help;color:#1565c0;font-size:0.8em;'
-                f'margin-left:6px;border-bottom:1px dotted #1565c0">why?</span>')
+        return (f'<span title="{safe}" style="cursor:help;color:#2563eb;font-size:0.82em;'
+                f'margin-left:6px;border-bottom:1px dotted #2563eb;font-weight:600">why?</span>')
 
     def action_box(action: str) -> str:
         if not action: return ""
-        return (f'<div style="margin-top:6px;background:#fff8e1;border-left:3px solid #f57f17;'
-                f'padding:8px 12px;border-radius:4px;font-size:0.82em;color:#444">'
-                f'<strong style="color:#e65100">Action Required:</strong> {action}</div>')
+        return (f'<div style="margin-top:8px;background:#fffbeb;border-left:4px solid #f59e0b;'
+                f'padding:10px 14px;border-radius:6px;font-size:0.83em;color:#78350f;line-height:1.4">'
+                f'<strong style="color:#b45309">👉 Action Required:</strong> {action}</div>')
 
     # ── stat cards ──
-    def stat(n, label, color="#1a1a2e"):
-        return (f'<div style="background:#fff;border-radius:8px;padding:14px 20px;text-align:center;'
-                f'box-shadow:0 1px 3px rgba(0,0,0,.1);min-width:110px">'
-                f'<div style="font-size:2.2em;font-weight:700;color:{color}">{n}</div>'
-                f'<div style="font-size:0.75em;color:#666;margin-top:3px">{label}</div></div>')
+    def stat(n, label, color="#0f172a", bg="#ffffff"):
+        return (f'<div style="background:{bg};border-radius:16px;padding:20px 24px;text-align:center;'
+                f'border:1px solid #e2e8f0;box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);min-width:140px;flex:1">'
+                f'<div style="font-size:2.2em;font-weight:800;color:{color};line-height:1">{n}</div>'
+                f'<div style="font-size:0.78em;color:#475569;font-weight:600;margin-top:8px;line-height:1.2">{label}</div></div>')
 
     stats_html = (
         stat(r.total_modules,"Modules") +
         stat(r.total_items,"Lessons & Activities") +
-        stat(r.items_pass,"Auto-Imported","#2e7d32") +
-        stat(r.items_warn,"Need Attention","#e65100") +
-        stat(r.items_skip,"Placeholders (Skipped)","#9e9e9e") +
-        stat(f"{r.auto_import_rate}%","Auto-Import Rate",
-             "#2e7d32" if r.auto_import_rate >= 85 else "#e65100") +
+        stat(r.items_pass,"Auto-Imported","#10b981") +
+        stat(r.items_warn,"Need Attention","#f59e0b") +
+        stat(r.items_skip,"Skipped Headers","#71717a") +
+        stat(f"{r.auto_import_rate}%","Success Rate",
+             "#10b981" if r.auto_import_rate >= 85 else "#f59e0b") +
         stat(r.total_assets,"Assets Checked") +
-        stat(r.assets_pass,"Assets Passed","#2e7d32") +
-        stat(r.assets_fail,"Assets Failed","#c62828")
+        stat(r.assets_pass,"Assets Passed","#10b981") +
+        stat(r.assets_fail,"Assets Failed","#ef4444")
     )
 
     # ── structure table ──
     struct_rows = ""
     for c in r.structure_checks:
         struct_rows += (
-            f"<tr><td style='font-weight:500'>{c.name}</td>"
-            f"<td>{badge(c.status)}</td>"
-            f"<td style='font-size:0.85em;color:#444'>{c.value}{tooltip(c.why)}</td>"
-            f"<td>{action_box(c.action)}</td></tr>"
+            f"<tr><td style='font-weight:600;padding:14px;color:#0f172a'>{c.name}</td>"
+            f"<td style='padding:14px'>{badge(c.status)}</td>"
+            f"<td style='font-size:0.88em;color:#334155;padding:14px'>{c.value}{tooltip(c.why)}</td>"
+            f"<td style='padding:14px'>{action_box(c.action)}</td></tr>"
         )
 
     # ── module sections ──
     mod_html = ""
     for m in r.module_results:
-        bc = "#2e7d32" if m.status==Status.PASS else "#e65100"
+        bc = "#10b981" if m.status==Status.PASS else "#f59e0b"
         issue_html = "".join(
-            f'<div style="background:#fff8e1;border-left:3px solid #f57f17;padding:8px 12px;'
-            f'margin-bottom:8px;border-radius:4px;font-size:0.83em;color:#555">'
+            f'<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:8px 12px;'
+            f'margin-bottom:8px;border-radius:4px;font-size:0.83em;color:#78350f">'
             f'<strong>Note:</strong> {iss}</div>'
             for iss in m.issues
         )
         item_rows = ""
         for i in m.items:
-            type_badge = (
-                f'<span style="background:#e3f2fd;color:#1565c0;padding:1px 7px;'
-                f'border-radius:8px;font-size:0.75em;font-weight:600;margin-right:6px">{i.item_type}</span>'
-            )
-            # For WARN items show the why inline as a callout, not just a tooltip
-            why_html = ""
-            if i.status == Status.WARN and i.why:
-                why_html = (
-                    f'<div style="margin-top:6px;background:#fff8e1;border-left:3px solid #f57f17;'
-                    f'padding:8px 12px;border-radius:4px;font-size:0.81em;color:#444;line-height:1.5">'
-                    f'<strong style="color:#e65100">Root Cause:</strong> {i.why}</div>'
+            # Only Lesson, Assignment, Quiz, and Discussion should show a type badge
+            if i.item_type in ["Lesson", "Assignment", "Quiz", "Discussion"]:
+                type_badge = (
+                    f'<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;'
+                    f'border-radius:100px;font-size:0.75em;font-weight:700;margin-right:6px;display:inline-block">'
+                    f'{i.item_type}</span>'
                 )
+            else:
+                type_badge = ""
+            extra_html = ""
+
+            if i.status == Status.WARN and i.why:
+                # WARN: amber callout with root cause
+                extra_html = (
+                    f'<div style="margin-top:6px;background:#fffbeb;border-left:3px solid #f59e0b;'
+                    f'padding:10px 14px;border-radius:6px;font-size:0.83em;color:#78350f;line-height:1.4">'
+                    f'<strong style="color:#b45309">Root Cause:</strong> {i.why}</div>'
+                )
+            elif i.status == Status.SKIP and i.why and "PUBLISHER LTI" in i.why.upper():
+                action_html = ""
+                if i.action:
+                    action_html = (
+                        f'<div style="margin-top:6px;background:#fffbeb;border-left:3px solid #f59e0b;'
+                        f'padding:10px 14px;border-radius:6px;font-size:0.83em;color:#78350f;line-height:1.4">'
+                        f'<strong style="color:#b45309">&#9888; Required before go-live:</strong> {i.action}</div>'
+                    )
+                extra_html = (
+                    f'<div style="margin-top:6px;background:#eff6ff;border-left:3px solid #3b82f6;'
+                    f'padding:10px 14px;border-radius:6px;font-size:0.83em;color:#1e3a8a;line-height:1.4">'
+                    f'<strong style="color:#1d4ed8">&#9432; Publisher External Tool:</strong> {i.why}'
+                    f'</div>{action_html}'
+                )
+            elif i.status == Status.SKIP and i.why:
+                # Canvas SubHeader SKIP: subtle grey tooltip note
+                extra_html = (
+                    f'<div style="margin-top:4px;font-size:0.8em;color:#64748b;font-style:italic">'
+                    f'{i.why}</div>'
+                )
+
             item_rows += (
                 f"<tr>"
-                f"<td style='font-size:0.85em'>{type_badge}{i.title}{why_html}</td>"
-                f"<td style='white-space:nowrap'>{badge(i.status)}</td>"
-                f"<td style='font-size:0.82em;color:#555'>{i.detail}</td>"
-                f"<td style='font-size:0.82em'>"
+                f"<td style='padding:14px;font-size:0.9em'>{type_badge}<strong style='color:#0f172a'>{i.title}</strong>{extra_html}</td>"
+                f"<td style='padding:14px;vertical-align:middle'>{badge(i.status)}</td>"
+                f"<td style='padding:14px;font-size:0.88em;color:#475569'>{i.detail}</td>"
+                f"<td style='padding:14px;font-size:0.88em'>"
             )
             if i.attachments:
-                item_rows += f'<span style="color:#2e7d32">{i.attachments} file(s) in S3</span>'
-            item_rows += action_box(i.action) + "</td></tr>"
+                item_rows += f'<span style="background:#ecfdf5;color:#15803d;padding:2px 8px;border-radius:100px;font-size:0.78em;font-weight:600">📁 {i.attachments} file(s) in S3</span>'
+            if i.status != Status.SKIP or (i.status == Status.SKIP and "PUBLISHER LTI" not in (i.why or "").upper()):
+                item_rows += action_box(i.action)
+            item_rows += "</td></tr>"
         mod_html += f"""
-        <div style="margin-bottom:18px;border-left:4px solid {bc};padding:14px 18px;
-                    background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.07)">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-            {badge(m.status)}
-            <div>
-              <div style="font-weight:700;font-size:1em;color:#1a1a2e">{m.week_label}</div>
-               <div style="font-size:0.78em;color:#888;margin-top:1px">
-                 Original title: <em>{m.title}</em> &nbsp;·&nbsp; {m.item_count} item(s)
-               </div>
+        <div style="margin-bottom:32px;border:1px solid #e2e8f0;border-left:5px solid {bc};
+                    background:#fff;border-radius:16px;box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);overflow:hidden">
+          <div style="padding:18px 24px;background:#f8fafc;border-bottom:1px solid #e2e8f0;
+                      display:flex;align-items:center;justify-content:between;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              {badge(m.status)}
+              <div>
+                <div style="font-weight:700;font-size:1.05em;color:#0f172a">{m.week_label}</div>
+                <div style="font-size:0.8em;color:#64748b;margin-top:2px">
+                  Original title: <em>{m.title}</em> &nbsp;·&nbsp; {m.item_count} item(s)
+                </div>
+              </div>
             </div>
           </div>
-          {issue_html}
-          <table style="width:100%;border-collapse:collapse;font-size:0.88em">
-            <thead><tr style="background:#f8f9fa">
-              <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:2px solid #e0e0e0">Lesson / Activity</th>
-              <th style="padding:6px 10px;font-weight:600;border-bottom:2px solid #e0e0e0">Status</th>
-              <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:2px solid #e0e0e0">Detail</th>
-              <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:2px solid #e0e0e0">Action Required</th>
-            </tr></thead>
-            <tbody>{item_rows}</tbody>
-          </table>
+          <div style="padding:20px 24px">
+            {issue_html}
+            <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+              <thead><tr style="background:#f8fafc">
+                <th style="padding:10px 14px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;color:#475569;font-size:0.82em;text-transform:uppercase">Lesson / Activity</th>
+                <th style="padding:10px 14px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;color:#475569;font-size:0.82em;text-transform:uppercase">Status</th>
+                <th style="padding:10px 14px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;color:#475569;font-size:0.82em;text-transform:uppercase">Detail</th>
+                <th style="padding:10px 14px;text-align:left;font-weight:600;border-bottom:2px solid #e2e8f0;color:#475569;font-size:0.82em;text-transform:uppercase">Action Required</th>
+              </tr></thead>
+              <tbody>{item_rows}</tbody>
+            </table>
+          </div>
         </div>"""
 
     # ── asset table ──
@@ -930,64 +977,67 @@ def generate_html(r: ValidationReport) -> str:
     for a in r.asset_results:
         asset_rows += (
             f"<tr>"
-            f"<td style='font-size:0.82em;word-break:break-all'>{a.name}</td>"
-            f"<td>{badge(a.status)}</td>"
-            f"<td style='font-size:0.82em'>{_sz(a.size_bytes) if a.size_bytes else '—'}</td>"
-            f"<td style='font-size:0.82em;color:#555'>{a.detail}</td>"
-            f"<td style='font-size:0.75em;word-break:break-all'>"
-            f"<a href='{a.url}' target='_blank' style='color:#1565c0'>{a.url}</a></td>"
+            f"<td style='padding:14px;font-size:0.88em;word-break:break-all;font-weight:500;color:#0f172a'>{a.name}</td>"
+            f"<td style='padding:14px'>{badge(a.status)}</td>"
+            f"<td style='padding:14px;font-size:0.88em;color:#475569'>{_sz(a.size_bytes) if a.size_bytes else '—'}</td>"
+            f"<td style='padding:14px;font-size:0.88em;color:#475569'>{a.detail}</td>"
+            f"<td style='padding:14px;font-size:0.82em;word-break:break-all'>"
+            f"<a href='{a.url}' target='_blank' style='color:#4f46e5;text-decoration:none;font-weight:600;display:inline-flex;align-items:center;gap:4px'>"
+            f"🌐 View Asset</a></td>"
             f"</tr>"
         )
     if not asset_rows:
-        asset_rows = "<tr><td colspan='5' style='color:#999;font-style:italic;padding:12px'>No assets found in this course.</td></tr>"
+        asset_rows = "<tr><td colspan='5' style='color:#94a3b8;font-style:italic;padding:16px;text-align:center'>No assets found in this course.</td></tr>"
 
     # ── metadata table ──
     meta_rows = ""
     for c in r.metadata_checks:
         meta_rows += (
-            f"<tr><td style='font-weight:500'>{c.name}</td>"
-            f"<td>{badge(c.status)}</td>"
-            f"<td style='font-size:0.85em;color:#444'>{c.value}{tooltip(c.why)}</td>"
-            f"<td>{action_box(c.action)}</td></tr>"
+            f"<tr><td style='font-weight:600;padding:14px;color:#0f172a'>{c.name}</td>"
+            f"<td style='padding:14px'>{badge(c.status)}</td>"
+            f"<td style='font-size:0.88em;color:#334155;padding:14px'>{c.value}{tooltip(c.why)}</td>"
+            f"<td style='padding:14px'>{action_box(c.action)}</td></tr>"
         )
 
     # ── manual tasks ──
     if r.manual_tasks:
         tasks_html = "".join(
-            f'<div style="background:#fff;border:1px solid #e0e0e0;border-left:4px solid #e65100;'
-            f'border-radius:6px;padding:12px 16px;margin-bottom:10px">'
-            f'<div style="font-size:0.85em;color:#333;white-space:pre-wrap">'
-            f'<strong style="color:#e65100">Task {i}.</strong> {t}</div></div>'
+            f'<div style="background:#fff;border:1px solid #e2e8f0;border-left:4px solid #f59e0b;'
+            f'border-radius:12px;padding:16px 20px;margin-bottom:12px;box-shadow:0 4px 10px -5px rgba(0,0,0,0.05);'
+            f'display:flex;align-items:flex-start;gap:14px">'
+            f'<input type="checkbox" style="margin-top:4px;width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">'
+            f'<div style="font-size:0.9em;color:#334155;line-height:1.5">'
+            f'<strong style="color:#b45309">Task {i}:</strong> {t}</div></div>'
             for i,t in enumerate(r.manual_tasks,1)
         )
     else:
-        tasks_html = ('<div style="background:#e8f5e9;border-left:4px solid #2e7d32;'
-                      'padding:12px 16px;border-radius:6px;color:#2e7d32;font-weight:600">'
-                      'No manual tasks required — course is fully automated.</div>')
+        tasks_html = ('<div style="background:#ecfdf5;border-left:4px solid #10b981;border-radius:12px;'
+                      'padding:20px;color:#15803d;font-weight:700;font-size:0.9em;display:flex;align-items:center;gap:8px">'
+                      '✨ No manual tasks required — this course is 100% automated and ready to go live!</div>')
 
     # ── legend ──
     legend = """
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#fff;
-                border-radius:8px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:24px">
-      <div style="display:flex;gap:10px;align-items:flex-start;font-size:0.83em;color:#444">
-        <span style="background:#e8f5e9;color:#2e7d32;border:1px solid #2e7d32;padding:2px 8px;border-radius:8px;font-weight:700;white-space:nowrap">PASS</span>
-        <span>Item was successfully imported. No action needed.</span>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;background:#fff;
+                border-radius:16px;padding:24px;border:1px solid #e2e8f0;box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);margin-bottom:32px">
+      <div style="display:flex;gap:12px;align-items:flex-start;font-size:0.85em;color:#475569">
+        <span style="background:#ecfdf4;color:#15803d;border:1px solid #10b98130;padding:2px 8px;border-radius:100px;font-weight:700;white-space:nowrap">✅ PASS</span>
+        <div><strong>Passed:</strong> Item successfully imported. No action needed.</div>
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-start;font-size:0.83em;color:#444">
-        <span style="background:#ffebee;color:#c62828;border:1px solid #c62828;padding:2px 8px;border-radius:8px;font-weight:700;white-space:nowrap">FAIL</span>
-        <span>Critical error — item is broken or missing. Must be fixed before publishing.</span>
+      <div style="display:flex;gap:12px;align-items:flex-start;font-size:0.85em;color:#475569">
+        <span style="background:#fef2f2;color:#b91c1c;border:1px solid #f43f5e30;padding:2px 8px;border-radius:100px;font-weight:700;white-space:nowrap">🛑 FAIL</span>
+        <div><strong>Failed:</strong> Critical error (missing required structure/file). Must be resolved.</div>
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-start;font-size:0.83em;color:#444">
-        <span style="background:#fffde7;color:#f57f17;border:1px solid #f57f17;padding:2px 8px;border-radius:8px;font-weight:700;white-space:nowrap">WARN</span>
-        <span>Item imported but needs manual attention. Hover the "why?" link for details.</span>
+      <div style="display:flex;gap:12px;align-items:flex-start;font-size:0.85em;color:#475569">
+        <span style="background:#fffbeb;color:#b45309;border:1px solid #f59e0b30;padding:2px 8px;border-radius:100px;font-weight:700;white-space:nowrap">⚠️ WARN</span>
+        <div><strong>Warning:</strong> Imported but has missing pieces (e.g. missing attachment). Review suggested.</div>
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-start;font-size:0.83em;color:#444">
-        <span style="background:#fff3e0;color:#e65100;border:1px solid #e65100;padding:2px 8px;border-radius:8px;font-weight:700;white-space:nowrap">RETRY</span>
-        <span>Asset uploaded but is 0 bytes. Re-run the ingestion to fix.</span>
+      <div style="display:flex;gap:12px;align-items:flex-start;font-size:0.85em;color:#475569">
+        <span style="background:#fff7ed;color:#c2410c;border:1px solid #f9731630;padding:2px 8px;border-radius:100px;font-weight:700;white-space:nowrap">🔄 RETRY</span>
+        <div><strong>Empty Upload:</strong> File upload is 0 bytes. Re-running ingestion usually fixes it.</div>
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-start;font-size:0.83em;color:#444">
-        <span style="background:#f5f5f5;color:#757575;border:1px solid #bdbdbd;padding:2px 8px;border-radius:8px;font-weight:700;white-space:nowrap">SKIP</span>
-        <span>Navigation placeholder — no content expected. Not counted in accuracy metrics.</span>
+      <div style="display:flex;gap:12px;align-items:flex-start;font-size:0.85em;color:#475569">
+        <span style="background:#f8fafc;color:#475569;border:1px solid #cbd5e1;padding:2px 8px;border-radius:100px;font-weight:700;white-space:nowrap">ℹ️ SKIP</span>
+        <div><strong>Skipped:</strong> Standard visual labels or external publisher pages (content hosted externally).</div>
       </div>
     </div>"""
 
@@ -1000,19 +1050,19 @@ def generate_html(r: ValidationReport) -> str:
     ]
     if config_note_items:
         notes_html = "".join(
-            f'<div style="background:#fff;border:1px solid #e0e0e0;border-left:4px solid #1565c0;'
-            f'border-radius:6px;padding:12px 16px;margin-bottom:10px">'
-            f'<div style="font-size:0.85em;color:#333">'
-            f'<strong style="color:#1565c0">{m_label} › {i.title}</strong><br>'
-            f'<span style="color:#555;font-size:0.92em">{i.action}</span>'
+            f'<div style="background:#fff;border:1px solid #e2e8f0;border-left:4px solid #2563eb;'
+            f'border-radius:12px;padding:16px 20px;margin-bottom:12px;box-shadow:0 4px 10px -5px rgba(0,0,0,0.05)">'
+            f'<div style="font-size:0.9em;color:#334155">'
+            f'<strong style="color:#1d4ed8">⚙️ {m_label} › {i.title}</strong><br>'
+            f'<span style="color:#475569;font-size:0.92em;display:block;margin-top:6px">{i.action}</span>'
             f'</div></div>'
             for m_label, i in config_note_items
         )
         config_notes_html = f"""
-  <h2>7 · Configuration Notes</h2>
-  <p style="font-size:0.83em;color:#666;margin-bottom:12px">
+  <h2>⚙️ LMS Configuration Notes (For System Admins)</h2>
+  <p class="section-desc">
     These items were <strong>successfully imported</strong> but require a one-time
-    configuration step in the target LMS. They do not block publishing.
+    configuration step in the target LMS to function correctly (e.g. Respondus proctoring or publisher credentials).
   </p>
   {notes_html}"""
     else:
@@ -1028,52 +1078,123 @@ def generate_html(r: ValidationReport) -> str:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Ingestion Validation Report for {r.course_title}">
   <title>Ingestion Report — {r.course_title}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
-    body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-          background:#f0f2f5;color:#212529;padding:28px}}
+    body{{font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+          background:#f8fafc;color:#0f172a;padding:40px 24px;line-height:1.5}}
     .wrap{{max-width:1280px;margin:0 auto}}
-    h1{{font-size:1.7em;color:#1a1a2e;margin-bottom:4px}}
-    .sub{{color:#666;font-size:0.85em;margin-bottom:16px;line-height:1.7}}
-    h2{{font-size:1.05em;margin:28px 0 12px;color:#333;
-        border-bottom:2px solid #e0e0e0;padding-bottom:6px;text-transform:uppercase;
-        letter-spacing:.04em}}
-    table{{border-collapse:collapse;width:100%;background:#fff;border-radius:8px;
-           overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:8px}}
-    th{{background:#f5f5f5;padding:8px 12px;text-align:left;font-weight:600;
-        border-bottom:2px solid #ddd;font-size:0.83em;text-transform:uppercase;letter-spacing:.03em}}
-    td{{padding:8px 12px;border-bottom:1px solid #f0f0f0;vertical-align:top}}
+    
+    /* Header card */
+    .header-card {{
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #fff;
+      padding: 36px;
+      border-radius: 20px;
+      margin-bottom: 32px;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+    }}
+    .header-card h1 {{
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+      background: linear-gradient(to right, #60a5fa, #a78bfa, #ffffff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }}
+    .header-card .sub {{
+      color: #94a3b8;
+      font-size: 0.88rem;
+      line-height: 1.7;
+    }}
+    .header-card .sub strong {{
+      color: #f1f5f9;
+    }}
+    .header-card code {{
+      background: #334155;
+      padding: 2px 6px;
+      border-radius: 6px;
+      color: #cbd5e1;
+      font-family: Consolas, monospace;
+      font-size: 0.9em;
+    }}
+    
+    h2{{font-size:1.25rem;margin:40px 0 16px;color:#0f172a;
+        border-bottom:2px solid #e2e8f0;padding-bottom:10px;text-transform:uppercase;
+        letter-spacing:.06em;font-weight:800;display:flex;align-items:center;gap:8px}}
+    
+    p.section-desc {{
+      font-size: 0.9rem;
+      color: #475569;
+      margin-bottom: 20px;
+      margin-top: -8px;
+    }}
+    
+    table{{border-collapse:collapse;width:100%;background:#fff;border-radius:16px;
+           overflow:hidden;box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);margin-bottom:24px;
+           border:1px solid #e2e8f0}}
+    th{{background:#f8fafc;padding:12px 16px;text-align:left;font-weight:600;
+        border-bottom:2px solid #e2e8f0;font-size:0.8em;text-transform:uppercase;color:#475569;letter-spacing:.05em}}
+    td{{padding:14px 16px;border-bottom:1px solid #f1f5f9;vertical-align:top}}
     tr:last-child td{{border-bottom:none}}
-    .verdict{{padding:18px 22px;border-radius:8px;font-size:1.15em;font-weight:700;
-              border-left:6px solid {vc};background:#fff;margin-top:28px;
-              box-shadow:0 1px 4px rgba(0,0,0,.1)}}
-    .verdict-reason{{font-size:0.85em;font-weight:400;color:#555;margin-top:6px;line-height:1.5}}
-    .stats{{display:flex;gap:14px;margin-bottom:24px;flex-wrap:wrap}}
-    .pdf-btn{{display:inline-block;background:#1a1a2e;color:#fff;border:none;
-              border-radius:6px;padding:10px 22px;font-size:0.9em;font-weight:600;
+    tr:hover td{{background:#f8fafc}}
+    
+    /* Verdict banner */
+    .verdict{{padding:28px;border-radius:16px;font-size:1.15em;font-weight:700;
+              border-left:6px solid {vc};background:{vc_bg};color:{vc_fg};margin-top:32px;
+              box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);margin-bottom:32px}}
+    .verdict-reason{{font-size:0.9em;font-weight:400;color:#334155;margin-top:8px;line-height:1.6}}
+    .verdict-badge {{
+      display: inline-block;
+      background: {vc};
+      color: #fff;
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 0.7em;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }}
+    
+    .stats{{display:flex;gap:16px;margin-bottom:32px;flex-wrap:wrap}}
+    
+    .pdf-btn{{display:inline-flex;align-items:center;gap:8px;background:#4f46e5;color:#fff;border:none;
+              border-radius:10px;padding:12px 24px;font-size:0.9em;font-weight:600;
               cursor:pointer;letter-spacing:.02em;margin-bottom:20px;
-              box-shadow:0 2px 6px rgba(0,0,0,.2);text-decoration:none}}
-    .pdf-btn:hover{{background:#2d2d4e}}
+              box-shadow:0 4px 14px rgba(79, 70, 229, 0.3);text-decoration:none;transition:background 0.2s}}
+    .pdf-btn:hover{{background:#4338ca}}
+    
     @media print{{
-      body{{background:#fff;padding:16px;font-size:11pt}}
+      body{{background:#fff;padding:16px;font-size:10pt}}
       .pdf-btn{{display:none!important}}
       .wrap{{max-width:100%}}
-      h2{{margin-top:18px}}
+      h2{{margin-top:24px}}
+      .header-card {{
+        background: none!important;
+        color: #000!important;
+        border: 2px solid #000;
+        box-shadow: none!important;
+        padding: 16px;
+      }}
+      .header-card h1 {{
+        -webkit-text-fill-color: initial!important;
+        color: #000!important;
+      }}
       table{{box-shadow:none;border:1px solid #ccc;page-break-inside:avoid}}
-      .verdict{{box-shadow:none;border:1px solid #ccc}}
-      .stats > div{{box-shadow:none;border:1px solid #ddd}}
-      /* Show full URL after every link so PDFs have clickable/readable URLs */
+      .verdict{{box-shadow:none;border:1px solid #ccc;background:#fff!important}}
+      .stats > div{{box-shadow:none;border:1px solid #ddd;flex:1 1 120px}}
       a[href]:after{{
         content:" (" attr(href) ")";
-        font-size:0.78em;
-        color:#555;
+        font-size:0.75em;
+        color:#475569;
         word-break:break-all;
       }}
-      /* Don't expand tooltip spans or internal anchors */
       a[href^="#"]:after,
       span[title]:after{{content:""}}
-      /* Asset URL cells already show the full URL as link text — don't repeat */
       td a[href^="http"]:after{{content:""}}
     }}
   </style>
@@ -1081,89 +1202,82 @@ def generate_html(r: ValidationReport) -> str:
 <body>
 <div class="wrap">
 
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:8px">
-    <h1>Course Ingestion Validation Report</h1>
-    <button class="pdf-btn" onclick="window.print()">Download as PDF</button>
-  </div>
-
-  <div class="sub">
-    <strong>Institution:</strong> {r.institution_name or r.institution or "—"} &nbsp;·&nbsp;
-    <strong>Course:</strong> {r.course_title} &nbsp;·&nbsp;
-    <strong>Code:</strong> {r.course_code or "—"} &nbsp;·&nbsp;
-    <strong>Department:</strong> {r.department or "—"}<br>
-    <strong>MongoDB ID:</strong> <code>{r.course_id}</code> &nbsp;·&nbsp;
-    <strong>Slug:</strong> <code>{r.slug}</code> &nbsp;·&nbsp;
-    <strong>Mode:</strong> {"STRICT" if r.strict else "STANDARD"} &nbsp;·&nbsp;
-    <strong>Generated:</strong> {ts}
-  </div>
-
-  <div class="stats">{stats_html}</div>
-
-  <h2>How to Read This Report</h2>
-  {legend}
-
-  <h2>1 · Course Mapping Status</h2>
-  <p style="font-size:0.83em;color:#666;margin-bottom:12px">
-    Shows how each Canvas content type was translated into the LMS schema.
-    A 100% coverage means every item in the manifest was successfully mapped.
-    Items below 100% indicate content that needs manual attention (see Section 5).
-  </p>
-  {mapping_html}
-
-  <h2>2 · Course Structure Integrity</h2>
-  <p style="font-size:0.83em;color:#666;margin-bottom:10px">
-    Verifies that all required database fields are present and populated.
-  </p>
-  <table><thead><tr><th>Field</th><th>Status</th><th>Value</th><th>Action</th></tr></thead>
-  <tbody>{struct_rows}</tbody></table>
-
-   <h2>3 · Module &amp; Component Validation</h2>
-   <p style="font-size:0.83em;color:#666;margin-bottom:12px">
-     <strong>Note on dates:</strong> Module titles like <em>"Week 1 (9/9)"</em> use the
-     source LMS convention of <em>(Month/Day)</em> to indicate the class meeting date.
-     This report converts them to readable labels (e.g. <em>Sep 9</em>) for clarity.
-     The original title is shown in grey below each module heading.
-   </p>
-  {mod_html if mod_html else "<p style='color:#999;font-style:italic'>No modules found.</p>"}
-
-  <h2>4 · Asset Storage Validation (S3)</h2>
-  <p style="font-size:0.83em;color:#666;margin-bottom:10px">
-    Every file attached to a lesson is HEAD-checked against the S3 bucket
-    <strong>{os.getenv("S3_CDN_BUCKET","—")}</strong> to confirm it was uploaded successfully.
-  </p>
-  <table><thead><tr><th>File Name</th><th>Status</th><th>Size</th><th>Detail</th><th>S3 URL</th></tr></thead>
-  <tbody>{asset_rows}</tbody></table>
-
-  <h2>5 · Thumbnail &amp; Metadata Validation</h2>
-  <p style="font-size:0.83em;color:#666;margin-bottom:10px">
-    Checks course metadata quality. Items marked WARN are functional but need enrichment.
-  </p>
-  <table><thead><tr><th>Check</th><th>Status</th><th>Current Value</th><th>Action</th></tr></thead>
-  <tbody>{meta_rows}</tbody></table>
-
-  <h2>6 · Manual Tasks Checklist</h2>
-  <p style="font-size:0.83em;color:#666;margin-bottom:12px">
-    These are the <strong>only remaining items that require human action</strong>.
-    Everything else was handled automatically by the pipeline.
-  </p>
-  {tasks_html}
-
-  {config_notes_html}
-
-  <div class="verdict">
-    {r.verdict_label}
-    <div class="verdict-reason">{r.verdict_reason}</div>
-    <div style="margin-top:10px;font-size:0.82em;color:#555">
-      Auto-Import Rate: <strong style="color:{'#2e7d32' if r.auto_import_rate >= 85 else '#e65100'}">{r.auto_import_rate}%</strong>
-      &nbsp;·&nbsp; {r.items_pass} auto-imported &nbsp;·&nbsp;
-      {r.items_warn} need attention &nbsp;·&nbsp;
-      {r.items_skip} placeholders skipped
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+    <div class="header-card" style="flex:1">
+      <h1>Course Ingestion Validation Report</h1>
+      <div class="sub">
+        <strong>Institution:</strong> {r.institution_name or r.institution or "—"} &nbsp;·&nbsp;
+        <strong>Course:</strong> {r.course_title} &nbsp;·&nbsp;
+        <strong>Code:</strong> {r.course_code or "—"} &nbsp;·&nbsp;
+        <strong>Department:</strong> {r.department or "—"}<br>
+        <strong>MongoDB ID:</strong> <code>{r.course_id}</code> &nbsp;·&nbsp;
+        <strong>Slug:</strong> <code>{r.slug}</code> &nbsp;·&nbsp;
+        <strong>Validation Mode:</strong> {"STRICT (Enforces zero warnings)" if r.strict else "STANDARD (Flexible checking)"} &nbsp;·&nbsp;
+        <strong>Generated at:</strong> {ts}
+      </div>
     </div>
   </div>
+
+  <div class="verdict">
+    <span class="verdict-badge">{verdict_badge_text}</span>
+    <div style="font-size:1.15em;font-weight:700">{r.verdict_label}</div>
+    <div class="verdict-reason">{r.verdict_reason}</div>
+    <div style="margin-top:16px;font-size:0.82em;color:#475569;border-top:1px solid #e2e8f0;padding-top:12px;font-weight:600">
+      Auto-Import Rate: <strong style="color:{'#10b981' if r.auto_import_rate >= 85 else '#f59e0b'}">{r.auto_import_rate}%</strong>
+      &nbsp;·&nbsp; {r.items_pass} lessons successfully auto-imported &nbsp;·&nbsp;
+      {r.items_warn} require manual attention &nbsp;·&nbsp;
+      {r.items_skip} section placeholders skipped
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+    <h2>📊 Key Validation Metrics</h2>
+    <button class="pdf-btn" onclick="window.print()">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+      </svg>
+      Download Report PDF
+    </button>
+  </div>
+  <div class="stats">{stats_html}</div>
+
+  <h2>💡 How to Read This Report</h2>
+  <p class="section-desc">Understand what the color-coded status badges mean for each lesson item in the table below.</p>
+  {legend}
+
+  <h2>📋 1 · Action Required checklist</h2>
+  <p class="section-desc">These are the tasks that <strong>must be completed manually</strong> before the course can go live. Check them off as you complete them.</p>
+  {tasks_html}
+
+  <h2>🔗 2 · Course Mapping Status</h2>
+  <p class="section-desc">Shows how different Canvas formats (pages, quizzes, discussions) were converted into the corresponding database schemas.</p>
+  {mapping_html}
+
+  <h2>🏗️ 3 · Course Structure Integrity</h2>
+  <p class="section-desc">Confirms that all necessary database metadata fields are present and properly formatted.</p>
+  <table><thead><tr><th>Required Database Field</th><th>Validation Status</th><th>Current Value</th><th>Admin Action</th></tr></thead>
+  <tbody>{struct_rows}</tbody></table>
+
+  <h2>📂 4 · Module &amp; Lesson Content Validation</h2>
+  <p class="section-desc">A detailed checklist of every module and lesson item. Review any items marked with warnings.</p>
+  {mod_html if mod_html else "<p style='color:#94a3b8;font-style:italic'>No modules found.</p>"}
+
+  <h2>☁️ 5 · Asset Storage Validation (S3)</h2>
+  <p class="section-desc">Verifies that every file attached to a lesson has been successfully stored on the CDN server and is accessible.</p>
+  <table><thead><tr><th>File Name</th><th>Upload Status</th><th>File Size</th><th>Detail / Reason</th><th>CDN Link</th></tr></thead>
+  <tbody>{asset_rows}</tbody></table>
+
+  <h2>🏷️ 6 · Thumbnail &amp; Metadata Validation</h2>
+  <p class="section-desc">Verifies course metadata quality, including dashboard cover images.</p>
+  <table><thead><tr><th>Metadata Checked</th><th>Status</th><th>Current Value</th><th>Action</th></tr></thead>
+  <tbody>{meta_rows}</tbody></table>
+
+  {config_notes_html}
 
 </div>
 </body>
 </html>"""
+
 
 # ── Core runner (called by CLI and by ingestion worker) ──────────────────────
 
@@ -1231,13 +1345,49 @@ def save_report(rep: ValidationReport, out_dir: Path, emit_json=True) -> Path:
     are kept in separate folders.
     Returns the HTML path.
     """
-    # Institution subfolder — e.g. storage/outputs/SFC/ or storage/outputs/WBU/
-    inst_folder = out_dir / (rep.institution or "UNKNOWN")
+    # Force the destination folder to outputs/SFC/Predictive Data Analytics-MS as requested
+    inst_folder = Path("B:/EduvateHub/CourseOnboarding/storage/outputs/SFC/Predictive Data Analytics-MS")
     inst_folder.mkdir(parents=True, exist_ok=True)
 
     safe = re.sub(r"[^\w-]","_", rep.slug or rep.course_id)
     html_path = inst_folder / f"validation_{safe}.html"
     html_path.write_text(generate_html(rep), encoding="utf-8")
+    
+    # Save a CSV spreadsheet of skips, warnings, and failures if they exist
+    has_issues = False
+    for m in rep.module_results:
+        for i in m.items:
+            if i.status in (Status.WARN, Status.SKIP, Status.FAIL):
+                has_issues = True
+                break
+        if has_issues:
+            break
+
+    if has_issues:
+        csv_path = inst_folder / f"validation_{safe}.csv"
+        import csv
+        try:
+            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["Module", "Item Title", "Type", "Status", "Detail", "Root Cause", "Action Required"])
+                for m in rep.module_results:
+                    for i in m.items:
+                        if i.status in (Status.WARN, Status.SKIP, Status.FAIL):
+                            why_clean = (i.why or "").replace("\n", " ").strip()
+                            action_clean = (i.action or "").replace("\n", " ").strip()
+                            writer.writerow([
+                                m.week_label or m.title or "",
+                                i.title or "",
+                                i.item_type or "",
+                                i.status.value,
+                                i.detail or "",
+                                why_clean,
+                                action_clean
+                            ])
+            print(f"[validate] CSV Spreadsheet saved -> {csv_path}")
+        except Exception as e:
+            print(f"[validate] ERROR writing CSV: {e}")
+
     if emit_json:
         from dataclasses import asdict
         def _s(o): return o.value if isinstance(o,Status) else (_ for _ in ()).throw(TypeError(str(type(o))))

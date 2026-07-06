@@ -53,6 +53,17 @@ def sanitize_html(
     if not content:
         return ""
     
+    # Completely decompose <script> and <style> tags and their contents
+    # so their raw JS/CSS text doesn't leak out as plain text.
+    try:
+        soup = BeautifulSoup(content, 'html.parser')
+        for s in soup(['script', 'style']):
+            s.decompose()
+        content = str(soup)
+    except Exception:
+        content = re.sub(r'(?is)<script\b[^>]*>.*?</script>', '', content)
+        content = re.sub(r'(?is)<style\b[^>]*>.*?</style>', '', content)
+
     # IMPORTANT:
     # We normalize whitespace for readability, but we must not destroy
     # formatting inside <pre> / <code> (where code indentation matters).

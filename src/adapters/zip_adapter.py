@@ -48,11 +48,26 @@ class ZipAdapter:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 safe_extractall(zip_ref, extract_dir)
                 
-            # Traverse into a single top-level directory if present
+            # Traverse into a single top-level directory if present,
+            # or extract a nested archive (.imscc/.zip) if it's the only file.
             root_items = list(extract_dir.iterdir())
             if len(root_items) == 1 and root_items[0].is_dir():
                 extract_dir = root_items[0]
                 logger.info(f"Traversing into nested top-level directory: {extract_dir.name}")
+            elif len(root_items) == 1 and root_items[0].is_file() and root_items[0].suffix in ('.imscc', '.zip'):
+                nested_zip_path = root_items[0]
+                logger.info(f"Detected nested archive: {nested_zip_path.name}. Extracting...")
+                nested_extract_dir = Path(tempfile.mkdtemp(prefix="lms_nested_zip_extract_"))
+                with zipfile.ZipFile(nested_zip_path, 'r') as zip_ref:
+                    safe_extractall(zip_ref, nested_extract_dir)
+                
+                # Cleanup the outer extract directory
+                try:
+                    shutil.rmtree(extract_dir)
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup outer extract dir: {e}")
+                
+                extract_dir = nested_extract_dir
 
         try:
             # 4. Detect format

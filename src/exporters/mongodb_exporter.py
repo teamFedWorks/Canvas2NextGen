@@ -10,6 +10,12 @@ from utils.resilience import retry
 
 logger = get_logger(__name__)
 
+def to_object_id(value: Any, field_name: str) -> bson.ObjectId:
+    raw_value = str(value or "").strip()
+    if not raw_value or not bson.ObjectId.is_valid(raw_value):
+        raise ValueError(f"{field_name} must be a valid MongoDB ObjectId. Received: {value!r}")
+    return bson.ObjectId(raw_value)
+
 class MongoDBExporter:
     """
     Exports the transformed course document to MongoDB with size validation and retries.
@@ -86,7 +92,7 @@ class MongoDBExporter:
         # 1. Check by Canvas ID (Strongest Match)
         if canvas_course_id:
             course = self._db['courses'].find_one({
-                "universityId": university_id,
+                "createdBy": bson.ObjectId(university_id),
                 "canvas_course_id": canvas_course_id
             })
             if course:
@@ -94,8 +100,7 @@ class MongoDBExporter:
         
         # 2. Check by Title in same Program (Fuzzy Match)
         course = self._db['courses'].find_one({
-            "universityId": university_id,
-            "programId": program_id,
+            "createdBy": bson.ObjectId(university_id),
             "title": title
         })
         return str(course["_id"]) if course else None
@@ -108,17 +113,31 @@ class MongoDBExporter:
         self._ensure_connection()
         collection = self._db['courses']
 
-        # 1. Convert string IDs to BSON ObjectIds for Node.js compatibility
-        try:
-            if "university" in course_data and isinstance(course_data["university"], str):
-                course_data["university"] = bson.ObjectId(course_data["university"])
-            if "authorId" in course_data and isinstance(course_data["authorId"], str):
-                course_data["authorId"] = bson.ObjectId(course_data["authorId"])
-            # programId is not in the target JSON but might be passed for legacy/internal use
-            if "programId" in course_data and isinstance(course_data["programId"], str):
-                course_data["programId"] = bson.ObjectId(course_data["programId"])
-        except Exception as e:
-            logger.log("WARNING", "Failed to convert IDs to ObjectId", error=str(e))
+        # 1. Convert and validate IDs before writing. Empty strings are never safe
+        # for ObjectId reference fields because Node/Mongoose populate() will cast
+        # and crash on them later.
+        course_data["university"] = to_object_id(course_data.get("university"), "course.university")
+        course_data["authorId"] = to_object_id(course_data.get("authorId"), "course.authorId")
+
+        # Generate missing IDs for curriculum modules and items to prevent navigation rendering issue
+        curriculum = course_data.get("curriculum", [])
+        for mod in curriculum:
+            if "_id" not in mod or mod["_id"] is None:
+                mod["_id"] = bson.ObjectId()
+            items = mod.get("items", [])
+            for item in items:
+                if "_id" not in item or item["_id"] is None:
+                    item["_id"] = bson.ObjectId()
+
+        # ── Onboarding schema enforcement ──────────────────────────────────────
+        # university  → ""          (blank; platform populates at publish time)
+        # programId   → ""          (blank; platform populates at publish time)
+        # createdBy   → university._id  (who initiated the course creation)
+        # status      → "draft"
+        course_data["createdBy"] = course_data["university"]
+        course_data["universityId"] = str(course_data["university"])
+        course_data["programId"]  = None
+        course_data["status"]     = "Draft"
 
         # 2. Size Validation
         serialized = bson.BSON.encode(course_data)
@@ -133,12 +152,13 @@ class MongoDBExporter:
         # 3. Export (Upsert based on slug to support --force)
         slug = course_data.get('slug')
         if slug:
+            query = {"slug": slug, "university": course_data["university"]}
             result = collection.replace_one(
-                {"slug": slug},
+                query,
                 course_data,
                 upsert=True
             )
-            inserted_id = result.upserted_id or collection.find_one({"slug": slug})["_id"]
+            inserted_id = result.upserted_id or collection.find_one(query)["_id"]
         else:
             result = collection.insert_one(course_data)
             inserted_id = result.inserted_id

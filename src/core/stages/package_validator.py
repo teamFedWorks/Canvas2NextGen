@@ -30,7 +30,10 @@ class PackageValidator:
                 # Check for Zip Slip
                 for member in zip_ref.namelist():
                     # Resolve path to check for directory traversal
-                    if member.startswith('/') or '..' in member or member.startswith('\\'):
+                    # Check for actual path traversal segments
+                    normalized = member.replace('\\', '/')
+                    parts = normalized.split('/')
+                    if member.startswith('/') or member.startswith('\\') or '..' in parts:
                          return False, f"Security risk: Potential Zip Slip detected in {member}"
 
             return True, "Validation successful."

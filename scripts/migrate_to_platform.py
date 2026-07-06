@@ -87,10 +87,8 @@ def ensure_university(platform_db, name: str, short_name: str) -> bson.ObjectId:
 def ensure_program(platform_db, university_id: bson.ObjectId, title: str) -> bson.ObjectId:
     """Get or create the program document in the platform DB.
     
-    NOTE: The programs collection has a unique index on {universityId, bundleUrl}.
-    Since bundleUrl is null for all our programs, only one program per university
-    can be created this way. We first try to find by title, then fall back to
-    any existing program for that university.
+    Checks by title first, then slugifies the title to check by bundleUrl,
+    ensuring multiple programs can coexist under the same university.
     """
     # First: try exact match by title
     existing = platform_db.programs.find_one({
@@ -98,21 +96,27 @@ def ensure_program(platform_db, university_id: bson.ObjectId, title: str) -> bso
         "title": title
     })
     if existing:
-        print(f"  [prog] Found program: {existing['_id']} ({title})")
+        print(f"  [prog] Found program by title: {existing['_id']} ({title})")
         return existing["_id"]
 
-    # Second: try to find any existing program for this university
-    # (the unique index prevents creating duplicates with bundleUrl=null)
-    any_existing = platform_db.programs.find_one({"universityId": str(university_id)})
-    if any_existing:
-        # Update its title to match what we need, or just use it as-is
-        print(f"  [prog] Using existing program: {any_existing['_id']} ('{any_existing.get('title')}' -> using for '{title}')")
-        return any_existing["_id"]
+    # Slugify title for bundleUrl
+    import re
+    bundle_url = re.sub(r'[-\s]+', '-', re.sub(r'[^\w\s-]', '', title.lower())).strip('-')
 
-    # Third: create new — first program for this university
+    # Second: try matching by bundleUrl
+    existing_url = platform_db.programs.find_one({
+        "universityId": str(university_id),
+        "bundleUrl": bundle_url
+    })
+    if existing_url:
+        print(f"  [prog] Found program by bundleUrl: {existing_url['_id']} ({title})")
+        return existing_url["_id"]
+
+    # Third: create new program
     try:
         doc = {
             "title": title,
+            "bundleUrl": bundle_url,
             "universityId": str(university_id),
             "status": "active",
             "createdAt": now(),
@@ -122,8 +126,8 @@ def ensure_program(platform_db, university_id: bson.ObjectId, title: str) -> bso
         print(f"  [prog] Created program: {result.inserted_id} ({title})")
         return result.inserted_id
     except Exception as e:
-        # Race condition or constraint violation — find what's there
-        fallback = platform_db.programs.find_one({"universityId": str(university_id)})
+        # Fallback in case of race conditions
+        fallback = platform_db.programs.find_one({"universityId": str(university_id), "bundleUrl": bundle_url})
         if fallback:
             print(f"  [prog] Fallback program: {fallback['_id']}")
             return fallback["_id"]
@@ -381,12 +385,17 @@ def main():
 
             # ── Resolve program per course ────────────────────────────────
             prog_title = "General"
-            if institution_code == "SFC":
-                # Derive program from department
-                dept = src.get("department", "")
-                prog_title = dept or "General"
-            elif institution_code == "WBU":
-                prog_title = "Leadership & Management"
+            if "programId" in src and src["programId"]:
+                pipeline_prog = pipeline_db.programs.find_one({"_id": to_object_id(src["programId"])})
+                if pipeline_prog:
+                    prog_title = pipeline_prog.get("title") or pipeline_prog.get("name") or prog_title
+            else:
+                if institution_code == "SFC":
+                    # Derive program from department
+                    dept = src.get("department", "")
+                    prog_title = dept or "General"
+                elif institution_code == "WBU":
+                    prog_title = "Leadership & Management"
 
             prog_cache_key = f"{uni_id}:{prog_title}"
             if prog_cache_key not in _prog_cache:

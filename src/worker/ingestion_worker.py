@@ -102,6 +102,7 @@ class IngestionWorker:
                 task_id,
                 on_progress,
                 institution=institution,
+                program_name=program_name,
             )
 
         except Exception as e:
@@ -125,6 +126,7 @@ class IngestionWorker:
         task_id, 
         on_progress,
         institution: str = "",
+        program_name: str = "",
     ) -> Dict[str, Any]:
         """
         Runs the standard transformation and export pipeline.
@@ -186,7 +188,11 @@ class IngestionWorker:
         self.exporter.track_job(task_id, "N/A", "completed", course_id=course_id)
 
         # Auto-generate validation report immediately after ingestion
-        self._run_post_ingestion_validation(course_id, canvas_course.title)
+        self._run_post_ingestion_validation(
+            course_id, canvas_course.title,
+            institution=institution,
+            program_name=program_name,
+        )
 
         return {
             "status": "success",
@@ -195,10 +201,18 @@ class IngestionWorker:
             "task_id": task_id
         }
 
-    def _run_post_ingestion_validation(self, course_id: str, title: str) -> None:
+    def _run_post_ingestion_validation(
+        self,
+        course_id: str,
+        title: str,
+        institution: str = "",
+        program_name: str = "",
+    ) -> None:
         """
         Automatically runs the validation report after every successful ingestion.
-        Saves HTML + JSON to storage/outputs/validation_<slug>.html
+        Saves HTML + JSON to:
+          storage/outputs/<INSTITUTION>/<Program Name>/validation_<slug>.html
+        Falls back to storage/outputs/<INSTITUTION>/ if no program_name is available.
         """
         try:
             import sys
@@ -209,8 +223,13 @@ class IngestionWorker:
             from validate_ingestion import run_validation, save_report
             logger.info(f"Running post-ingestion validation for course {course_id}...")
             rep = run_validation(course_id, by_slug=False, strict=False, quiet=True)
-            out_dir = Path(__file__).parent.parent.parent / "storage" / "outputs"
-            html_path = save_report(rep, out_dir, emit_json=True)
+
+            # Pass the base outputs directory — save_report() builds
+            # institution / program subfolders internally.
+            base_dir = Path(__file__).parent.parent.parent / "storage" / "outputs"
+            base_dir.mkdir(parents=True, exist_ok=True)
+
+            html_path = save_report(rep, base_dir, emit_json=True)
             logger.info(f"Validation report saved: {html_path}",
                         extra={"verdict": rep.verdict.value, "manual_tasks": len(rep.manual_tasks)})
             msg = (f"\n[REPORT] Validation Report: {html_path}\n"

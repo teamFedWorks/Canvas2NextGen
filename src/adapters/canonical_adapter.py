@@ -6,7 +6,7 @@ All LMS adapters MUST implement this interface to produce CanonicalCourse models
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from models.canonical_models import CanonicalCourse, CanonicalModule, CanonicalCurriculumItem, CanonicalContentType, CanonicalAssessment, CanonicalQuestion, CanonicalQuestionType, SourcePlatform, CanonicalAsset
 from core.classifier import ClassificationResult
@@ -309,16 +309,62 @@ class CanvasToCanonicalAdapter(BaseCanonicalAdapter):
                 position=1000
             ))
     
+    # MIME type map for common course file extensions.
+    # Drives correct Content-Type in S3, the asset exporter, and the frontend viewer.
+    _MIME_BY_EXT: Dict[str, str] = {
+        # Office
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".ppt":  "application/vnd.ms-powerpoint",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc":  "application/msword",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls":  "application/vnd.ms-excel",
+        # Documents
+        ".pdf":  "application/pdf",
+        # Images
+        ".png":  "image/png",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif":  "image/gif",
+        ".webp": "image/webp",
+        ".svg":  "image/svg+xml",
+        # Video
+        ".mp4":  "video/mp4",
+        ".webm": "video/webm",
+        ".mov":  "video/quicktime",
+        # Audio
+        ".mp3":  "audio/mpeg",
+        ".ogg":  "audio/ogg",
+        ".wav":  "audio/wav",
+        # Web
+        ".html": "text/html",
+        ".htm":  "text/html",
+        ".xml":  "application/xml",
+        ".json": "application/json",
+        ".css":  "text/css",
+        ".js":   "application/javascript",
+        # Archives
+        ".zip":  "application/zip",
+    }
+
+    @classmethod
+    def _mime_from_filename(cls, filename: str) -> str:
+        """Derive MIME type from file extension. Falls back to octet-stream."""
+        ext = Path(filename).suffix.lower()
+        return cls._MIME_BY_EXT.get(ext, "application/octet-stream")
+
     def _convert_assets(self, resources, source_dir):
-        """Convert manifest resources to canonical assets."""
+        """Convert manifest resources to canonical assets with correct MIME types."""
         assets = []
         for res_id, res in resources.items():
             if res.href:
+                filename = Path(res.href).name
+                mime_type = self._mime_from_filename(filename)
                 asset = CanonicalAsset(
                     identifier=res_id,
-                    filename=Path(res.href).name,
+                    filename=filename,
                     source_path=res.href,
-                    mime_type="application/octet-stream"
+                    mime_type=mime_type,
                 )
                 assets.append(asset)
         return assets
