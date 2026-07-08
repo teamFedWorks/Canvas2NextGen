@@ -163,7 +163,49 @@ def _clean_bb_html(raw: str) -> str:
         for div in soup.find_all("div", attrs={"data-bbid": re.compile(r"bbml-editor-id")}):
             div.unwrap()
 
-        # ── Step 3: Serialize back to HTML string ─────────────────────────────────
+        # ── Step 3: Fix empty anchors with data-bbfile (attachment links) ─────────
+        # NOTE: We intentionally do NOT modify data-bbfile anchors here.
+        # The AssetUploader._process_html handles them with full brace-matching
+        # JSON extraction and S3 upload. Modifying them here would overwrite
+        # the anchor text before the uploader can extract the proper filename.
+        # The only exception: if the anchor is completely standalone (no surrounding
+        # attachment-wrapper) AND has a href that's already a CDN URL, set its text.
+        for anchor in soup.find_all("a"):
+            if "data-bbfile" not in str(anchor):
+                continue
+            if anchor.get_text(strip=True):
+                continue
+            # Has a real CDN/S3 href already — just set a fallback text so it renders
+            href = anchor.get("href", "")
+            if href and href.startswith("http") and "data-bbfile" in str(anchor):
+                # Try to extract name from the tag via brace-matching
+                tag_html = str(anchor)
+                start = tag_html.find("{")
+                end = tag_html.rfind("}")
+                link_name = ""
+                if start != -1 and end != -1 and end > start:
+                    import html as _hmod, json as _json
+                    candidate = tag_html[start:end + 1]
+                    candidate = _hmod.unescape(_hmod.unescape(candidate)).replace("&quot;", '"')
+                    try:
+                        meta = _json.loads(candidate)
+                        link_name = meta.get("linkName") or meta.get("displayName") or ""
+                    except Exception:
+                        pass
+                if link_name:
+                    anchor.string = link_name
+
+        # ── Step 4: Remove broken bbcswebdav images (xids not in the export) ──────
+        # Blackboard sometimes references images from previous course versions
+        # or other servers that weren't included in the export. Remove them to
+        # prevent broken image placeholders.
+        for img in soup.find_all("img"):
+            src = img.get("src", "")
+            if src.startswith("bbcswebdav/") and "xid-" in src:
+                # Broken reference to a Blackboard content server xid not in csfiles/
+                img.decompose()
+
+        # ── Step 5: Serialize back to HTML string ─────────────────────────────────
         result = str(soup)
 
         # Collapse excessive whitespace introduced by unwrapping
@@ -211,6 +253,24 @@ class _BBManifest:
         self._parse_organizations()
         return True
 
+    def _read_handler_from_dat(self, bb_file: str) -> str:
+        """
+        Read the CONTENTHANDLER value from a .dat file next to the manifest.
+        Returns empty string if file is missing or unreadable.
+        """
+        if not bb_file:
+            return ""
+        dat_path = self.manifest_path.parent / bb_file
+        if not dat_path.exists():
+            return ""
+        try:
+            import xml.etree.ElementTree as _ET
+            root = _ET.parse(str(dat_path)).getroot()
+            h = root.find("CONTENTHANDLER")
+            return h.get("value", "") if h is not None else ""
+        except Exception:
+            return ""
+
     def _parse_resources(self):
         """Build resource map from <resources> section."""
         resources_elem = self._root.find("resources")
@@ -221,47 +281,115 @@ class _BBManifest:
             bb_file = res.get("{http://www.blackboard.com/content-packaging/}file", "")
             res_type = res.get("type", "")
             title = res.get("{http://www.blackboard.com/content-packaging/}title", "")
-            if ident:
-                self.resources[ident] = {
-                    "bb_file": bb_file,
-                    "type": res_type,
-                    "title": title,
-                }
-                # Index by title too (for cross-resolution)
-                if title:
-                    existing = self._title_to_resource.get(title)
-                    new_type = res_type
-                    # Prioritize richer resources over generic document wrappers
-                    if existing:
-                        existing_type = existing.get("type", "")
-                        richer_types = ("assessment/x-bb-qti-test", "resource/x-bb-discussionboard", "resource/x-bb-announcement", "resource/x-bb-weblink")
-                        generic_types = ("resource/x-bb-document", "course/x-bb-coursetoc")
-                        if existing_type in richer_types and new_type in generic_types:
-                            pass  # Keep the existing richer resource
-                        else:
-                            self._title_to_resource[title] = self.resources[ident]
-                    else:
-                        self._title_to_resource[title] = self.resources[ident]
+            if not ident:
+                continue
 
-        # After all resources loaded, build redirects:
-        # Document wrappers that have a matching assessment/discussion resource
-        # should redirect to the richer type.
+            # ── Handler-based type enrichment ────────────────────────────────
+            # For resources whose manifest type is the generic 'resource/x-bb-document',
+            # read the CONTENTHANDLER from the .dat file to get the real semantic type.
+            # This catches LTI placements (bltiplacement-*) and assessment test-links
+            # (x-bb-asmt-test-link) that Blackboard exports with a generic manifest type.
+            if res_type == "resource/x-bb-document" and bb_file:
+                handler = self._read_handler_from_dat(bb_file)
+                if handler:
+                    if "bltiplacement" in handler.lower() or (
+                        "lti" in handler.lower() and "placement" in handler.lower()
+                    ):
+                        # LTI external tool — promote to a distinct type so the
+                        # title-redirect logic doesn't clobber it.
+                        res_type = "resource/x-bb-lti"
+                    elif handler == "resource/x-bb-file":
+                        res_type = "resource/x-bb-file"
+                    # Note: asmt-test-link and courselink handlers are resolved by
+                    # the title-redirect logic below (their QTI/discussion counterparts
+                    # carry the same title).
+
+            self.resources[ident] = {
+                "bb_file": bb_file,
+                "type": res_type,
+                "title": title,
+            }
+
+            # ── Title index (for cross-resolution) ───────────────────────────
+            # Build a title → best-resource map, favouring richer semantic types.
+            if title:
+                existing = self._title_to_resource.get(title)
+                # Priority order (highest → lowest):
+                #   1. assessment/x-bb-qti-test with subtype=Assignment  (real assignment)
+                #   2. assessment/x-bb-qti-test  (quiz/test)
+                #   3. resource/x-bb-discussionboard
+                #   4. resource/x-bb-weblink / resource/x-bb-announcement
+                #   5. resource/x-bb-lti  (LTI placement)
+                #   6. resource/x-bb-document / course/x-bb-coursetoc  (generic wrapper)
+                TYPE_PRIORITY = {
+                    "assessment/x-bb-qti-test":       2,
+                    "resource/x-bb-discussionboard":  3,
+                    "resource/x-bb-weblink":          4,
+                    "resource/x-bb-announcement":     4,
+                    "resource/x-bb-lti":              5,
+                    "resource/x-bb-document":         6,
+                    "course/x-bb-coursetoc":          6,
+                }
+                new_priority = TYPE_PRIORITY.get(res_type, 7)
+                if existing:
+                    existing_priority = TYPE_PRIORITY.get(existing.get("type", ""), 7)
+                    if new_priority < existing_priority:
+                        self._title_to_resource[title] = self.resources[ident]
+                    # Tie-break for qti-test: prefer subtype=Assignment over plain quiz
+                    elif new_priority == existing_priority == 2:
+                        # Check if new one is an assignment subtype
+                        if self._is_qti_assignment(bb_file):
+                            self._title_to_resource[title] = self.resources[ident]
+                else:
+                    self._title_to_resource[title] = self.resources[ident]
+
+        # ── Build redirect table ──────────────────────────────────────────────
+        # Document wrappers in the TOC (x-bb-document, course/x-bb-coursetoc)
+        # that have a richer counterpart under the same title get redirected.
+        # Folders that are purely structural containers (used as module-level
+        # wrappers) must NOT be redirected to announcements — only leaf items
+        # that represent real interactive content should redirect.
+        REDIRECT_TARGET_TYPES = (
+            "assessment/x-bb-qti-test",
+            "resource/x-bb-discussionboard",
+            "resource/x-bb-weblink",
+            # Intentionally excludes resource/x-bb-announcement:
+            # Blackboard announcement resources share names with folder titles
+            # (e.g. "Week 7 & 8"), causing false redirects.
+        )
         for rid, res in self.resources.items():
             res_type = res.get("type", "")
             title = res.get("title", "")
-            # Document or course toc wrappers that have a matching non-doc resource
             if res_type in ("resource/x-bb-document", "course/x-bb-coursetoc"):
                 if title and title in self._title_to_resource:
                     richer = self._title_to_resource[title]
                     richer_type = richer.get("type", "")
-                    # Redirect if the match is a more specific type (assessment, discussion, announcement)
-                    if richer_type in ("assessment/x-bb-qti-test", "resource/x-bb-discussionboard",
-                                        "resource/x-bb-announcement", "resource/x-bb-weblink"):
-                        # Use the richer resource's type and file
+                    if richer_type in REDIRECT_TARGET_TYPES:
                         res["type"] = richer_type
                         res["bb_file"] = richer["bb_file"]
                         self._resource_redirects[rid] = richer
-                        logger.info(f"[BB] Redirected {rid} ('{title}') → {richer_type} (file: {richer.get('bb_file')})")
+                        logger.info(
+                            f"[BB] Redirected {rid} ('{title}') → {richer_type}"
+                            f" (file: {richer.get('bb_file')})"
+                        )
+
+    def _is_qti_assignment(self, bb_file: str) -> bool:
+        """Return True if the QTI .dat file has bbmd_assessment_subtype == 'Assignment'."""
+        if not bb_file:
+            return False
+        dat_path = self.manifest_path.parent / bb_file
+        if not dat_path.exists():
+            return False
+        try:
+            import xml.etree.ElementTree as _ET
+            root = _ET.parse(str(dat_path)).getroot()
+            meta = root.find(".//assessmentmetadata")
+            if meta is None:
+                return False
+            st = meta.find("bbmd_assessment_subtype")
+            return st is not None and (st.text or "").strip().lower() == "assignment"
+        except Exception:
+            return False
 
     def _parse_organizations(self):
         """
@@ -457,13 +585,28 @@ class _BBAssessmentReader:
         subtype = meta.find("bbmd_assessment_subtype")
         return subtype is not None and (subtype.text or "").strip().lower() == "assignment"
 
+    @property
+    def rubric_html(self) -> str:
+        """
+        Extracts instructions/description from the <rubric> block of the assessment.
+        For assignments, Blackboard stores prompt text and attachments in a rubric block.
+        """
+        if self._root is None:
+            return ""
+        rubric = self._root.find(".//rubric")
+        if rubric is not None:
+            fmt = rubric.find(".//mat_formattedtext")
+            if fmt is not None and fmt.text:
+                return _clean_bb_html(fmt.text)
+        return ""
+
     def get_questions(self) -> List[Dict]:
-        """Extract question text and answer choices."""
+        """Extract question text, answer choices, and correct answers."""
         questions = []
         if self._root is None:
             return questions
 
-        for item in self._root.findall(".//item"):
+        for idx, item in enumerate(self._root.findall(".//item")):
             meta = item.find("itemmetadata")
             q_type = ""
             if meta is not None:
@@ -477,25 +620,58 @@ class _BBAssessmentReader:
                     q_text = _clean_bb_html(fmt.text)
                     break
 
+            # Find correct choice identifiers
+            correct_idents = set()
+            resprocessing = item.find("resprocessing")
+            if resprocessing is not None:
+                for respcondition in resprocessing.findall(".//respcondition"):
+                    # Check if this condition sets score to > 0 or max score
+                    setvar = respcondition.find(".//setvar")
+                    if setvar is not None and setvar.attrib.get("varname") == "SCORE":
+                        try:
+                            score_val = float(setvar.text or "0")
+                        except ValueError:
+                            score_val = 0.0
+                        if score_val > 0.0 or setvar.text == "100":
+                            for varequal in respcondition.findall(".//varequal"):
+                                if varequal.text:
+                                    correct_idents.add(varequal.text.strip())
+
             # Answer choices
-            choices = []
-            for label in item.findall(".//response_label"):
+            answers = []
+            for c_idx, label in enumerate(item.findall(".//response_label")):
+                lbl_id = label.get("ident", f"choice_{c_idx}")
+                
+                choice_text = ""
                 for fmt in label.findall(".//mat_formattedtext"):
                     if fmt.text:
-                        choices.append(_clean_bb_html(fmt.text))
+                        choice_text = _clean_bb_html(fmt.text)
                         break
                 else:
-                    # Plain text answer
                     for mt in label.findall(".//mattext"):
                         if mt.text:
-                            choices.append(mt.text.strip())
-                        break
+                            choice_text = mt.text.strip()
+                            break
+
+                # Translate true_false labels
+                if choice_text == "true_false.true" or lbl_id == "true_false.true":
+                    choice_text = "True"
+                elif choice_text == "true_false.false" or lbl_id == "true_false.false":
+                    choice_text = "False"
+
+                is_correct = lbl_id in correct_idents or (not correct_idents and c_idx == 0)
+                answers.append({
+                    "id": lbl_id,
+                    "text": choice_text or f"Option {c_idx+1}",
+                    "weight": 100.0 if is_correct else 0.0
+                })
 
             if q_text:
                 questions.append({
+                    "identifier": item.get("ident") or f"q_{idx}",
                     "text": q_text,
                     "type": q_type,
-                    "choices": choices,
+                    "answers": answers,
                 })
 
         return questions
@@ -579,7 +755,12 @@ def _walk_toc(
                     # original CONTENT .dat has the same identifier (e.g. res00036.dat).
                     node["bb_type"] = "assignment"
                     node["max_score"] = reader.max_score
-                    node["body"] = f"<p><strong>{reader.title}</strong></p>"
+                    
+                    rubric_content = reader.rubric_html
+                    if rubric_content:
+                        node["body"] = rubric_content
+                    else:
+                        node["body"] = f"<p><strong>{reader.title}</strong></p>"
                     # Read the original CONTENT .dat (same name as identifier) for description
                     original_dat = course_dir / f"{node['identifier']}.dat"
                     if original_dat.exists():
@@ -592,6 +773,32 @@ def _walk_toc(
                     node["max_score"] = reader.max_score
                     node["questions"] = reader.get_questions()
                     node["bb_type"] = "assessment"
+            elif bb_type == "resource/x-bb-lti":
+                # LTI / external tool placement — read description from the .dat file.
+                reader = _BBContentReader(dat_path)
+                node["bb_type"] = "external_tool"
+                node["is_folder"] = False
+                desc = reader.description
+                if desc:
+                    node["description"] = desc
+                    node["body"] = "<p>" + desc.replace("\n", "</p><p>") + "</p>"
+            elif bb_type == "resource/x-bb-file":
+                # Standalone file item (PDF, DOCX, etc.) stored in csfiles/.
+                # Read the FILE/NAME element to get the xid reference.
+                node["bb_type"] = "file"
+                node["is_folder"] = False
+                try:
+                    import xml.etree.ElementTree as _ET
+                    _root = _ET.parse(str(dat_path)).getroot()
+                    _name_el = _root.find(".//FILES/FILE/NAME")
+                    if _name_el is not None and _name_el.text:
+                        xid_ref = _name_el.text.strip()  # e.g. /xid-43978347_1
+                        node["xid_ref"] = xid_ref
+                    _linkname_el = _root.find(".//FILES/FILE/LINKNAME")
+                    if _linkname_el is not None and _linkname_el.text:
+                        node["file_linkname"] = _linkname_el.text.strip()
+                except Exception:
+                    pass
             elif "document" in bb_type or "coursetoc" in bb_type or "lesson" in bb_type:
                 reader = _BBContentReader(dat_path)
                 node["is_folder"] = reader.is_folder
@@ -603,7 +810,8 @@ def _walk_toc(
                 desc = reader.description
                 if desc:
                     node["description"] = desc
-                # Detect LTI/external tool handlers — mark as external_tool type
+                # Legacy fallback: detect LTI handlers not caught by _parse_resources
+                # (e.g. when manifest type wasn't upgraded). Should rarely fire.
                 handler_val = ""
                 try:
                     import xml.etree.ElementTree as _ET
@@ -682,6 +890,8 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
     #   "resource/x-bb-announcement" → page (announcement body)
     #   "course/x-bb-coursetoc" → folder → page
     #   "resource/x-bb-document" → page
+    #   "resource/x-bb-lti" → external_tool
+    #   "file" → file attachment (resolved via xid → csfiles)
     if "assessment" in bb_type or "qti-test" in bb_type:
         content_type = "quiz"
     elif bb_type == "assignment":
@@ -690,8 +900,10 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
         content_type = "discussion"
     elif "link" in bb_type or "weblink" in bb_type:
         content_type = "weblink"
-    elif bb_type == "external_tool":
+    elif bb_type in ("external_tool", "resource/x-bb-lti"):
         content_type = "external_tool"
+    elif bb_type == "file":
+        content_type = "file"
     elif "assignment" in bb_type:
         content_type = "assignment"
     else:
@@ -713,12 +925,15 @@ def _node_to_items(node: Dict) -> List[CanvasModuleItem]:
     item._bb_questions = node.get("questions", [])
     item._bb_description = node.get("description", "")  # assignment instructions
     item._content_ref = node.get("identifier", "")
+    # For file items: store the xid reference so the asset uploader can find the csfile
+    item._bb_xid_ref = node.get("xid_ref", "")
+    item._bb_file_linkname = node.get("file_linkname", "") or title
 
     # Only add the item if it has content OR is a meaningful typed item.
     # Skip structural containers that have no renderable content after all merges.
     # A folder that received content from its ultraDocumentBody child IS renderable.
     has_content = bool(body and body.strip())
-    is_typed = content_type in ("quiz", "discussion", "assignment", "weblink", "external_tool")
+    is_typed = content_type in ("quiz", "discussion", "assignment", "weblink", "external_tool", "file")
     # A node is a pure structural container only if it's a folder AND has no
     # content after ultraDocumentBody merge AND is not a typed item.
     is_empty_folder = node.get("is_folder", False) and not has_content and not is_typed
@@ -799,6 +1014,7 @@ class BlackboardAdapter:
         assignments: List[CanvasAssignment] = []
         discussions: List[CanvasDiscussion] = []
 
+        processed_titles = set()
         for toc_root in manifest.toc_roots:
             toc_title_elem = toc_root.find("title")
             toc_title = (
@@ -829,12 +1045,25 @@ class BlackboardAdapter:
             else:
                 module_nodes = raw_children
 
+            elevated_module_nodes = []
             for mod_node in module_nodes:
+                mod_title = mod_node.get("title", "Untitled Module")
+                if mod_title == "Weekly Course Content" and mod_node.get("children"):
+                    for child in mod_node.get("children", []):
+                        elevated_module_nodes.append(child)
+                else:
+                    elevated_module_nodes.append(mod_node)
+
+            for mod_node in elevated_module_nodes:
                 mod_title = mod_node.get("title", "Untitled Module")
 
                 # Skip --TOP-- structural nodes at module level
                 if mod_title == "--TOP--":
                     continue
+
+                if mod_title in processed_titles:
+                    continue
+                processed_titles.add(mod_title)
 
                 # Build items for this module
                 mod_items = _node_to_items(mod_node)
@@ -849,13 +1078,47 @@ class BlackboardAdapter:
                     item_id = item.identifier
 
                     if item.content_type == "quiz":
-                        from models.canvas_models import CanvasQuiz
+                        from models.canvas_models import CanvasQuiz, CanvasQuestion, CanvasQuestionAnswer, QuestionType
+                        
+                        mapped_qs = []
+                        bb_qs = getattr(item, "_bb_questions", [])
+                        for bbq in bb_qs:
+                            answers = []
+                            for ans in bbq.get("answers", []):
+                                answers.append(
+                                    CanvasQuestionAnswer(
+                                        id=ans["id"],
+                                        text=ans["text"],
+                                        weight=ans["weight"]
+                                    )
+                                )
+                            
+                            q_type_str = bbq.get("type", "").lower()
+                            q_type_enum = QuestionType.MULTIPLE_CHOICE
+                            if "true_false" in q_type_str or "true/false" in q_type_str or "either/or" in q_type_str:
+                                q_type_enum = QuestionType.TRUE_FALSE
+                            elif "essay" in q_type_str:
+                                q_type_enum = QuestionType.ESSAY
+                            elif "presentation only" in q_type_str:
+                                q_type_enum = QuestionType.TEXT_ONLY
+                            
+                            mapped_qs.append(
+                                CanvasQuestion(
+                                    identifier=bbq.get("identifier"),
+                                    title=bbq.get("identifier"),
+                                    question_type=q_type_enum,
+                                    question_text=bbq.get("text"),
+                                    answers=answers,
+                                    points_possible=0.0 if q_type_enum == QuestionType.TEXT_ONLY else 1.0
+                                )
+                            )
+                        
                         q = CanvasQuiz(
                             title=item.title,
                             identifier=item_id,
                             description=body,
-                            points_possible=getattr(item, "_bb_max_score", 0.0),
-                            questions=[],
+                            points_possible=getattr(item, "_bb_max_score", 0.0) or float(len(mapped_qs)),
+                            questions=mapped_qs,
                         )
                         quizzes.append(q)
 
@@ -880,6 +1143,45 @@ class BlackboardAdapter:
                             body=body,
                         )
                         discussions.append(d)
+
+                    elif item.content_type == "file":
+                        # Standalone file (PDF, DOCX, etc.) from csfiles/ via xid reference.
+                        # We store it as a CanvasPage whose body points to a csfiles path.
+                        # The AssetUploader will pick it up via the _bb_xid_ref attribute
+                        # and upload it to S3, then attach the CDN URL.
+                        xid_ref = getattr(item, "_bb_xid_ref", "")
+                        link_name = getattr(item, "_bb_file_linkname", "") or item.title
+                        # Resolve xid → actual file path in csfiles/
+                        csfile_path = ""
+                        if xid_ref and course_dir:
+                            xid_key = xid_ref.lstrip("/").replace("xid-", "")
+                            matches = list(Path(course_dir).rglob(f"__xid-{xid_key}*"))
+                            real_files = [m for m in matches if m.is_file() and not m.name.endswith(".xml")]
+                            if real_files:
+                                csfile_path = str(real_files[0].relative_to(Path(course_dir)))
+                                logger.info(f"[BB] File item '{item.title}': resolved xid {xid_ref} → {csfile_path}")
+                            else:
+                                logger.warning(f"[BB] File item '{item.title}': xid {xid_ref} not found in csfiles/")
+                        # Build a body that the AssetUploader's _process_html recognises:
+                        # an attachment-wrapper div pointing at the csfiles-relative path.
+                        if csfile_path:
+                            file_body = (
+                                f'<div class="attachment-wrapper" data-filename="{link_name}">'
+                                f'<a class="bb-file-link" href="{csfile_path}">{link_name}</a>'
+                                f'</div>'
+                            )
+                        else:
+                            file_body = f"<p>📎 {link_name}</p>"
+                        # Backfill _bb_body so course_transformer can read it
+                        item._bb_body = file_body
+                        page = CanvasPage(
+                            title=item.title,
+                            identifier=item_id,
+                            body=file_body,
+                            workflow_state=WorkflowState.ACTIVE,
+                            source_file=str(course_dir / csfile_path) if csfile_path else "",
+                        )
+                        pages.append(page)
 
                     else:
                         # Lesson / page

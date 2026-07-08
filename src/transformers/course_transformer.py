@@ -209,7 +209,7 @@ class CourseTransformer:
                             identifier=getattr(cq, "identifier", ""),
                             text=getattr(cq, "question_text", "") or "",
                             type=lms_qt,
-                            points=float(getattr(cq, "points_possible", 1.0) or 1.0),
+                            points=float(getattr(cq, "points_possible", 1.0) if getattr(cq, "points_possible", None) is not None else 1.0),
                             answers=answers,
                             generalFeedback=getattr(cq, "general_feedback", None),
                             position=getattr(cq, "position", None),
@@ -290,6 +290,17 @@ class CourseTransformer:
             body = getattr(c_item, '_bb_body', '')
             if body:
                 base_item.content = normalize_lesson_content(body, title=c_item.title)
+
+        elif c_item.content_type == 'file':
+            # Standalone file (PDF, DOCX, etc.) from Blackboard csfiles/.
+            # The body contains an attachment-wrapper div that the AssetUploader
+            # will convert to a CDN URL. We render it as a Resource lesson so
+            # the frontend can display it via the attachment viewer.
+            base_item.type = "Resource"
+            body = getattr(c_item, '_bb_body', '') or ''
+            if body:
+                base_item.content = normalize_lesson_content(body, title=c_item.title)
+
         # module item is not silently dropped from the course structure.
         return base_item
 

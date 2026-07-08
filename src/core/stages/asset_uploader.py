@@ -523,6 +523,34 @@ class AssetUploader:
         if not html_content or not isinstance(html_content, str):
             return html_content
 
+        # ── Pre-extract data-bbfile linkNames from raw HTML before BS4 parses ──
+        # BS4 truncates data-bbfile attributes when the JSON contains unescaped
+        # double-quotes (e.g. data-bbfile="{"linkName":"file.pdf"}").
+        # We extract all <a data-bbfile=...> anchors from the raw string first,
+        # keyed by their xid reference so we can look them up after BS4 parsing.
+        _bbfile_xid_to_name: Dict[str, str] = {}
+        import html as _html_mod, json as _json_mod
+        for raw_match in re.finditer(r'<a[^>]+data-bbfile[^>]*>', html_content, re.IGNORECASE | re.DOTALL):
+            raw_tag = raw_match.group(0)
+            # Find JSON via brace-matching
+            brace_start = raw_tag.find('{')
+            brace_end = raw_tag.rfind('}')
+            if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                candidate = raw_tag[brace_start:brace_end + 1]
+                candidate = _html_mod.unescape(_html_mod.unescape(candidate)).replace('&quot;', '"')
+                try:
+                    meta = _json_mod.loads(candidate)
+                    name = meta.get('linkName') or meta.get('displayName') or ''
+                    if name:
+                        # Key by xid if present in href
+                        xid_m = re.search(r'xid-(\d+_\d+)', raw_tag, re.IGNORECASE)
+                        if xid_m:
+                            _bbfile_xid_to_name[xid_m.group(1)] = name
+                        # Also key by full name for fallback
+                        _bbfile_xid_to_name[name.lower()] = name
+                except Exception:
+                    pass
+
         soup = BeautifulSoup(html_content, 'html.parser')
         modified = False
 
@@ -584,9 +612,18 @@ class AssetUploader:
                 # We'll still try xid-based resolution below (href often contains xid-...).
                 bb_file_meta = {}
 
+            # Resolve xid in href to get the pre-extracted linkName (from raw HTML scan)
+            _xid_in_href = None
+            _href_attr = anchor.get('href', '')
+            _xid_m = re.search(r'xid-(\d+_\d+)', str(_href_attr), re.IGNORECASE)
+            if _xid_m:
+                _xid_in_href = _xid_m.group(1)
+
             file_name = (
                 bb_file_meta.get('displayName')
                 or bb_file_meta.get('linkName')
+                # Fall back to pre-extracted name from raw HTML scan (BS4 truncated data-bbfile)
+                or (_xid_in_href and _bbfile_xid_to_name.get(_xid_in_href))
                 or anchor.get_text(strip=True)
                 or "Attachment"
             )

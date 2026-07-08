@@ -24,7 +24,7 @@ CANVAS_QUESTION_TYPE_MAP: dict = {
     "file_upload_question":             "essay",             # fallback
     "multiple_dropdowns_question":      "multiple_choice",   # closest equivalent
     "categorization_question":          "matching",          # closest equivalent
-    "text_only_question":               None,                # descriptive only - skip
+    "text_only_question":               "text_only",         # descriptive / instruction screen
 }
 
 # ---------------------------------------------------------------------------
