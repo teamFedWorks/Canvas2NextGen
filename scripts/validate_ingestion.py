@@ -1345,13 +1345,26 @@ def save_report(rep: ValidationReport, out_dir: Path, emit_json=True) -> Path:
     are kept in separate folders.
     Returns the HTML path.
     """
-    # Force the destination folder to outputs/SFC/Predictive Data Analytics-MS as requested
-    inst_folder = Path("B:/EduvateHub/CourseOnboarding/storage/outputs/SFC/Predictive Data Analytics-MS")
+    # Determine primary output folder dynamically based on institution
+    if rep.institution == "WBU":
+        inst_folder = out_dir / "WBU"
+    elif rep.institution == "SFC":
+        inst_folder = out_dir / "SFC/Predictive Data Analytics-MS"
+    else:
+        inst_folder = out_dir / (rep.institution or "general")
+
     inst_folder.mkdir(parents=True, exist_ok=True)
 
     safe = re.sub(r"[^\w-]","_", rep.slug or rep.course_id)
     html_path = inst_folder / f"validation_{safe}.html"
-    html_path.write_text(generate_html(rep), encoding="utf-8")
+    html_content = generate_html(rep)
+    html_path.write_text(html_content, encoding="utf-8")
+
+    # Also write to root-level output/WBU if WBU course
+    if rep.institution == "WBU":
+        root_output_wbu = Path("B:/EduvateHub/CourseOnboarding/output/WBU")
+        root_output_wbu.mkdir(parents=True, exist_ok=True)
+        (root_output_wbu / f"validation_{safe}.html").write_text(html_content, encoding="utf-8")
     
     # Save a CSV spreadsheet of skips, warnings, and failures if they exist
     has_issues = False
